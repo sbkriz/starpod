@@ -92,6 +92,9 @@ server_addr = "127.0.0.1:3000"
 
 # Telegram bot token (or set TELEGRAM_BOT_TOKEN env var)
 # telegram_bot_token = "123456:ABC..."
+
+# Telegram user IDs allowed to use the bot (empty = allow anyone)
+# telegram_allowed_users = [123456789]
 ```
 
 Config is per-project. Orion walks up from the current directory to find the nearest `.orion/` folder (like git finds `.git/`).
@@ -167,13 +170,23 @@ API key authentication: set `ORION_API_KEY` env var on the server, then `localSt
    export TELEGRAM_BOT_TOKEN="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
    ```
 
-3. **Start the server**
+3. **Restrict access (recommended)**
+
+   Find your Telegram user ID by messaging `@userinfobot` on Telegram. Then add it to `.orion/config.toml`:
+   ```toml
+   telegram_allowed_users = [123456789]
+   ```
+   Multiple users: `telegram_allowed_users = [123456789, 987654321]`
+
+   If you skip this, anyone who finds your bot can chat with it.
+
+4. **Start the server**
    ```bash
    orion agent serve
    ```
    You should see `Telegram  connected` in the startup banner. The bot is now running.
 
-4. **Chat with your bot**
+5. **Chat with your bot**
    - Open Telegram and search for your bot's username (e.g. `@my_orion_bot`)
    - Send `/start` to begin
    - Send any message — the bot uses the same agent as the web UI and API

@@ -1,8 +1,9 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use teloxide::prelude::*;
 use teloxide::types::ParseMode;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use orion_agent::OrionAgent;
 use orion_core::{ChatMessage, OrionConfig};
@@ -10,25 +11,49 @@ use orion_core::{ChatMessage, OrionConfig};
 /// Maximum Telegram message length.
 const MAX_MSG_LEN: usize = 4096;
 
+/// Allowed user IDs (empty = allow all).
+#[derive(Clone)]
+struct AllowedUsers(Arc<HashSet<u64>>);
+
 /// Run the Telegram bot.
 ///
 /// This takes ownership of the agent so it can be shared with the gateway
 /// if both are running. Pass `Arc<OrionAgent>` directly via `run_with_agent`.
 pub async fn run(config: OrionConfig, token: String) -> orion_core::Result<()> {
+    let allowed = config.telegram_allowed_users.clone();
     let agent = Arc::new(OrionAgent::new(config).await?);
-    run_with_agent(agent, token).await
+    run_with_agent_filtered(agent, token, allowed).await
 }
 
 /// Run the Telegram bot with a pre-built agent (for sharing with the gateway).
 pub async fn run_with_agent(agent: Arc<OrionAgent>, token: String) -> orion_core::Result<()> {
-    info!("Starting Telegram bot");
+    run_with_agent_filtered(agent, token, Vec::new()).await
+}
+
+/// Run the Telegram bot with a pre-built agent and an allow-list.
+pub async fn run_with_agent_filtered(
+    agent: Arc<OrionAgent>,
+    token: String,
+    allowed_users: Vec<u64>,
+) -> orion_core::Result<()> {
+    if allowed_users.is_empty() {
+        warn!("Telegram bot has no allowed_users configured — anyone can chat with it!");
+    } else {
+        info!(
+            allowed_users = ?allowed_users,
+            "Telegram bot restricted to {} user(s)",
+            allowed_users.len()
+        );
+    }
+
+    let allowed = AllowedUsers(Arc::new(allowed_users.into_iter().collect()));
 
     let bot = Bot::new(&token);
 
     let handler = Update::filter_message().endpoint(handle_message);
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![agent])
+        .dependencies(dptree::deps![agent, allowed])
         .default_handler(|_| async {})
         .error_handler(LoggingErrorHandler::with_custom_text(
             "Error in telegram handler",
@@ -45,17 +70,33 @@ async fn handle_message(
     bot: Bot,
     msg: TeloxideMessage,
     agent: Arc<OrionAgent>,
+    allowed: AllowedUsers,
 ) -> Result<(), teloxide::RequestError> {
     let text = match msg.text() {
         Some(t) => t.to_string(),
         None => return Ok(()), // Ignore non-text messages
     };
 
-    let user_id = msg.from.as_ref().map(|u| u.id.0.to_string());
+    let user_id = msg.from.as_ref().map(|u| u.id.0);
     let chat_id = msg.chat.id;
 
+    // Check allow-list
+    if !allowed.0.is_empty() {
+        let is_allowed = user_id.map(|id| allowed.0.contains(&id)).unwrap_or(false);
+        if !is_allowed {
+            debug!(
+                user_id = ?user_id,
+                chat_id = %chat_id,
+                "Rejected message from unauthorized user"
+            );
+            return Ok(());
+        }
+    }
+
+    let user_id_str = user_id.map(|id| id.to_string());
+
     debug!(
-        user_id = ?user_id,
+        user_id = ?user_id_str,
         chat_id = %chat_id,
         text = %text,
         "Telegram message received"
@@ -63,8 +104,21 @@ async fn handle_message(
 
     // Handle /start command
     if text == "/start" {
-        bot.send_message(chat_id, "Hello! I'm Orion, your personal AI assistant. Send me a message to get started.")
-            .await?;
+        let mut greeting = "Hello! I'm Orion, your personal AI assistant. Send me a message to get started.".to_string();
+        if let Some(id) = user_id {
+            greeting.push_str(&format!("\n\nYour user ID: `{}`", id));
+        }
+        bot.send_message(chat_id, greeting)
+            .parse_mode(ParseMode::MarkdownV2)
+            .await
+            .or_else(|_| {
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(
+                        bot.send_message(chat_id, "Hello! I'm Orion, your personal AI assistant. Send me a message to get started.").send()
+                    )
+                })
+            })
+            .ok();
         return Ok(());
     }
 
@@ -75,7 +129,7 @@ async fn handle_message(
 
     let chat_msg = ChatMessage {
         text,
-        user_id,
+        user_id: user_id_str,
         channel_id: Some("telegram".into()),
         attachments: Vec::new(),
     };

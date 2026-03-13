@@ -485,8 +485,11 @@ async fn main() -> anyhow::Result<()> {
                 let telegram_active = telegram_token.is_some();
                 if let Some(token) = telegram_token {
                     let tg_agent = Arc::clone(&agent);
+                    let allowed = config.telegram_allowed_users.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = orion_telegram::run_with_agent(tg_agent, token).await {
+                        if let Err(e) =
+                            orion_telegram::run_with_agent_filtered(tg_agent, token, allowed).await
+                        {
                             tracing::error!(error = %e, "Telegram bot error");
                         }
                     });

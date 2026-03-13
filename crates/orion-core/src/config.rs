@@ -39,6 +39,12 @@ pub struct OrionConfig {
     #[serde(default)]
     pub telegram_bot_token: Option<String>,
 
+    /// Telegram user IDs allowed to interact with the bot.
+    /// If empty, the bot accepts messages from anyone (not recommended).
+    /// Find your user ID by messaging @userinfobot on Telegram.
+    #[serde(default)]
+    pub telegram_allowed_users: Vec<u64>,
+
     /// The project root directory (not serialized — set at load time).
     #[serde(skip)]
     pub project_root: PathBuf,
@@ -66,6 +72,7 @@ impl Default for OrionConfig {
             max_turns: default_max_turns(),
             api_key: None,
             telegram_bot_token: None,
+            telegram_allowed_users: Vec::new(),
             project_root: PathBuf::new(),
         }
     }
@@ -174,6 +181,10 @@ server_addr = "127.0.0.1:3000"
 
 # Telegram bot token (or set TELEGRAM_BOT_TOKEN env var)
 # telegram_bot_token = ""
+
+# Telegram user IDs allowed to use the bot (empty = allow anyone)
+# Find your ID by messaging @userinfobot on Telegram
+# telegram_allowed_users = [123456789]
 "#;
 
         tokio::fs::write(orion_dir.join(CONFIG_FILE), config_content)
