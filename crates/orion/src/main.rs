@@ -1,8 +1,13 @@
+use std::time::Instant;
+
 use clap::{Parser, Subcommand};
+use colored::Colorize;
+use tokio_stream::StreamExt;
 use tracing_subscriber::EnvFilter;
 
+use agent_sdk::{ContentBlock, Message};
 use orion_agent::OrionAgent;
-use orion_core::{ChatMessage, OrionConfig};
+use orion_core::OrionConfig;
 
 #[derive(Parser)]
 #[command(name = "orion", about = "Orion — personal AI assistant", version)]
@@ -91,9 +96,239 @@ enum SessionAction {
     },
 }
 
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() > max {
+        format!("{}...", &s[..max])
+    } else {
+        s.to_string()
+    }
+}
+
+fn tool_icon(name: &str) -> &str {
+    match name {
+        "Read" => "📄",
+        "Grep" => "🔍",
+        "Glob" => "📂",
+        "Bash" => "⚡",
+        "Edit" => "✏️",
+        "Write" => "💾",
+        "MemorySearch" => "🧠",
+        "MemoryWrite" => "📝",
+        "MemoryAppendDaily" => "📅",
+        "VaultGet" => "🔐",
+        "VaultSet" => "🔑",
+        _ => "🔧",
+    }
+}
+
+fn tool_input_preview(name: &str, input: &serde_json::Value) -> String {
+    if let Some(path) = input.get("file_path").and_then(|v| v.as_str()) {
+        path.to_string()
+    } else if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
+        pattern.to_string()
+    } else if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
+        truncate(cmd, 60)
+    } else if let Some(q) = input.get("query").and_then(|v| v.as_str()) {
+        truncate(q, 60)
+    } else if let Some(key) = input.get("key").and_then(|v| v.as_str()) {
+        if name.starts_with("Vault") {
+            key.to_string()
+        } else {
+            let s = serde_json::to_string(input).unwrap_or_default();
+            truncate(&s, 80)
+        }
+    } else if let Some(file) = input.get("file").and_then(|v| v.as_str()) {
+        file.to_string()
+    } else {
+        let s = serde_json::to_string(input).unwrap_or_default();
+        truncate(&s, 80)
+    }
+}
+
+fn print_header() {
+    println!();
+    println!(
+        "{}",
+        "  ╭──────────────────────────────────────────╮".bright_cyan()
+    );
+    println!(
+        "{}",
+        "  │          Orion  ·  AI Assistant           │".bright_cyan()
+    );
+    println!(
+        "{}",
+        "  ╰──────────────────────────────────────────╯".bright_cyan()
+    );
+    println!();
+}
+
+fn print_separator() {
+    println!(
+        "  {}",
+        "─────────────────────────────────────────────".dimmed()
+    );
+}
+
+/// Process the agent stream with rich output. Returns (result_text, ResultMessage).
+async fn process_stream(
+    stream: &mut agent_sdk::Query,
+    start: &Instant,
+) -> anyhow::Result<(String, Option<agent_sdk::ResultMessage>)> {
+    let mut result_text = String::new();
+    let mut result_msg = None;
+    let mut turn = 0u32;
+
+    while let Some(msg_result) = stream.next().await {
+        let message = msg_result?;
+
+        match &message {
+            Message::System(sys) => {
+                println!(
+                    "  {} {}",
+                    "●".bright_green(),
+                    format!("Session {}", &sys.session_id[..8]).dimmed()
+                );
+                if let Some(ref model) = sys.model {
+                    println!("  {} Model: {}", "│".dimmed(), model.bright_white());
+                }
+                if let Some(ref tools) = sys.tools {
+                    println!("  {} Tools: {}", "│".dimmed(), tools.join(", ").dimmed());
+                }
+                print_separator();
+            }
+            Message::Assistant(assistant) => {
+                turn += 1;
+                let elapsed = start.elapsed().as_secs_f64();
+                println!(
+                    "\n  {} {}",
+                    format!("Turn {turn}").bright_magenta().bold(),
+                    format!("[{elapsed:.1}s]").dimmed()
+                );
+
+                for block in &assistant.content {
+                    match block {
+                        ContentBlock::Text { text } => {
+                            if !text.trim().is_empty() {
+                                // Collect text for final result
+                                if !result_text.is_empty() {
+                                    result_text.push('\n');
+                                }
+                                result_text.push_str(text);
+                            }
+                        }
+                        ContentBlock::ToolUse { name, input, .. } => {
+                            let icon = tool_icon(name);
+                            let preview = tool_input_preview(name, input);
+                            println!(
+                                "  {} {} {}",
+                                icon,
+                                name.bright_blue().bold(),
+                                preview.dimmed()
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Message::User(user) => {
+                for block in &user.content {
+                    if let ContentBlock::ToolResult {
+                        content, is_error, ..
+                    } = block
+                    {
+                        let result_str = content
+                            .as_str()
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| {
+                                serde_json::to_string(content).unwrap_or_default()
+                            });
+
+                        let lines: Vec<&str> = result_str.lines().collect();
+                        let preview = if lines.len() > 3 {
+                            format!(
+                                "{}\n    {} {}",
+                                lines[..3].join("\n    "),
+                                "...".dimmed(),
+                                format!("({} more lines)", lines.len() - 3).dimmed()
+                            )
+                        } else {
+                            truncate(&result_str, 200)
+                        };
+
+                        if is_error == &Some(true) {
+                            println!("    {} {}", "✗".red(), preview.red());
+                        } else {
+                            println!("    {} {}", "✓".green(), preview.dimmed());
+                        }
+                    }
+                }
+            }
+            Message::Result(result) => {
+                // Capture final result text if we don't have one
+                if result_text.is_empty() {
+                    if let Some(text) = &result.result {
+                        result_text = text.clone();
+                    }
+                }
+                result_msg = Some(result.clone());
+            }
+            _ => {}
+        }
+    }
+
+    Ok((result_text, result_msg))
+}
+
+fn print_result(result_text: &str, result_msg: &agent_sdk::ResultMessage, start: &Instant) {
+    println!();
+    print_separator();
+
+    if result_msg.is_error {
+        println!("  {} {}", "✗".red().bold(), "Error".red().bold());
+        for err in &result_msg.errors {
+            println!("    {}", err.red());
+        }
+    }
+
+    // Print response text
+    if !result_text.is_empty() {
+        println!();
+        for line in result_text.lines() {
+            println!("  {}", line);
+        }
+    }
+
+    // Stats line
+    println!();
+    print_separator();
+    let elapsed = start.elapsed().as_secs_f64();
+    println!(
+        "  {} {:.1}s  {} {} turns  {} ${:.4}  {} {}in / {}out",
+        "⏱".dimmed(),
+        elapsed,
+        "↻".dimmed(),
+        result_msg.num_turns,
+        "💰".dimmed(),
+        result_msg.total_cost_usd,
+        "📊".dimmed(),
+        result_msg
+            .usage
+            .as_ref()
+            .map(|u| format!("{}k", u.input_tokens / 1000))
+            .unwrap_or_default()
+            .bright_white(),
+        result_msg
+            .usage
+            .as_ref()
+            .map(|u| format!("{}k", u.output_tokens / 1000))
+            .unwrap_or_default()
+            .bright_white(),
+    );
+    print_separator();
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -109,24 +344,18 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Commands::Chat { message } => {
+            print_header();
+            let start = Instant::now();
             let agent = OrionAgent::new(config)?;
-            let response = agent
-                .chat(ChatMessage {
-                    text: message,
-                    user_id: None,
-                    channel_id: Some("cli".into()),
-                    attachments: Vec::new(),
-                })
-                .await?;
 
-            println!("{}", response.text);
+            let (mut stream, session_id) = agent.chat_stream(&message)?;
+            let (result_text, result_msg) = process_stream(&mut stream, &start).await?;
 
-            if let Some(usage) = &response.usage {
-                eprintln!(
-                    "\n[tokens: {}in/{}out, cost: ${:.4}]",
-                    usage.input_tokens, usage.output_tokens, usage.cost_usd
-                );
+            if let Some(ref result) = result_msg {
+                agent.finalize_chat(&session_id, &message, &result_text, result);
+                print_result(&result_text, result, &start);
             }
+            println!();
         }
 
         Commands::Repl => {
@@ -220,19 +449,28 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Interactive REPL mode.
+/// Interactive REPL mode with rich output.
 async fn run_repl(config: OrionConfig) -> anyhow::Result<()> {
     let agent = OrionAgent::new(config)?;
 
-    println!("Orion REPL — type your message, or 'exit' to quit.\n");
+    print_header();
+    println!(
+        "  {} Type your message, or {} to quit.\n",
+        "│".dimmed(),
+        "'exit'".bright_yellow()
+    );
 
     let mut rl = rustyline::DefaultEditor::new()?;
 
     loop {
-        let line = match rl.readline("you> ") {
+        let prompt = format!("{} ", "you>".bright_green().bold());
+        let line = match rl.readline(&prompt) {
             Ok(line) => line,
-            Err(rustyline::error::ReadlineError::Interrupted | rustyline::error::ReadlineError::Eof) => {
-                println!("Goodbye!");
+            Err(
+                rustyline::error::ReadlineError::Interrupted
+                | rustyline::error::ReadlineError::Eof,
+            ) => {
+                println!("\n  {} {}", "●".bright_yellow(), "Goodbye!".dimmed());
                 break;
             }
             Err(e) => {
@@ -246,22 +484,25 @@ async fn run_repl(config: OrionConfig) -> anyhow::Result<()> {
             continue;
         }
         if line == "exit" || line == "quit" {
-            println!("Goodbye!");
+            println!("\n  {} {}", "●".bright_yellow(), "Goodbye!".dimmed());
             break;
         }
 
         rl.add_history_entry(line)?;
 
-        let response = agent
-            .chat(ChatMessage {
-                text: line.to_string(),
-                user_id: None,
-                channel_id: Some("repl".into()),
-                attachments: Vec::new(),
-            })
-            .await?;
+        let start = Instant::now();
+        let (mut stream, session_id) = agent.chat_stream(line)?;
+        let (result_text, result_msg) = process_stream(&mut stream, &start).await?;
 
-        println!("\norion> {}\n", response.text);
+        if let Some(ref result) = result_msg {
+            agent.finalize_chat(&session_id, line, &result_text, result);
+            print_result(&result_text, result, &start);
+        } else if !result_text.is_empty() {
+            // Fallback if no ResultMessage
+            println!("\n  {}\n", result_text);
+        }
+
+        println!();
     }
 
     Ok(())

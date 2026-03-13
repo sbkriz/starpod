@@ -6,7 +6,7 @@ use chrono::Local;
 use tokio_stream::StreamExt;
 use tracing::{debug, error};
 
-use agent_sdk::{ExternalToolHandlerFn, Message, Options, PermissionMode};
+use agent_sdk::{ExternalToolHandlerFn, Message, Options, PermissionMode, Query};
 use agent_sdk::options::SystemPrompt;
 
 use orion_core::{ChatMessage, ChatResponse, ChatUsage, OrionConfig, OrionError, Result};
@@ -208,6 +208,107 @@ impl OrionAgent {
             session_id,
             usage: Some(usage),
         })
+    }
+
+    /// Start a streaming chat that yields raw agent-sdk messages.
+    ///
+    /// Returns (Query stream, session_id). The caller should consume the stream
+    /// for real-time display, then call `finalize_chat()` with the collected results.
+    pub fn chat_stream(&self, message: &str) -> Result<(Query, String)> {
+        // Resolve session
+        let session_id = match self.session_mgr.resolve_session()? {
+            SessionDecision::Continue(id) => {
+                debug!(session_id = %id, "Continuing existing session");
+                id
+            }
+            SessionDecision::New => {
+                let id = self.session_mgr.create_session()?;
+                debug!(session_id = %id, "Created new session");
+                id
+            }
+        };
+        self.session_mgr.touch_session(&session_id)?;
+
+        // Build system prompt
+        let bootstrap = self.memory.bootstrap_context()?;
+        let date_str = Local::now().format("%A, %B %d, %Y at %H:%M").to_string();
+        let system_prompt = format!(
+            "{}\n\n---\nCurrent date/time: {}\nSession ID: {}\n\
+             You have access to memory tools (MemorySearch, MemoryWrite, MemoryAppendDaily) \
+             and vault tools (VaultGet, VaultSet). Use MemorySearch to recall past conversations \
+             and knowledge. Use MemoryWrite to persist important information. Use MemoryAppendDaily \
+             to log notable events.",
+            bootstrap, date_str, session_id,
+        );
+
+        // Build allowed tools
+        let allowed_tools: Vec<String> = vec![
+            "Read".into(), "Bash".into(), "Glob".into(), "Grep".into(),
+            "MemorySearch".into(), "MemoryWrite".into(), "MemoryAppendDaily".into(),
+            "VaultGet".into(), "VaultSet".into(),
+        ];
+
+        // Build external tool handler
+        let memory_clone = Arc::clone(&self.memory);
+        let vault_clone = Arc::clone(&self.vault);
+        let handler: ExternalToolHandlerFn = Box::new(move |tool_name, input| {
+            let mem = Arc::clone(&memory_clone);
+            let vlt = Arc::clone(&vault_clone);
+            Box::pin(async move {
+                handle_custom_tool(&mem, &vlt, &tool_name, &input).await
+            })
+        });
+
+        let options = Options::builder()
+            .allowed_tools(allowed_tools)
+            .system_prompt(SystemPrompt::Custom(system_prompt))
+            .permission_mode(PermissionMode::BypassPermissions)
+            .model(&self.config.model)
+            .max_turns(self.config.max_turns)
+            .session_id(session_id.clone())
+            .external_tool_handler(handler)
+            .custom_tools(custom_tool_definitions())
+            .build();
+
+        let stream = agent_sdk::query(message, options);
+        Ok((stream, session_id))
+    }
+
+    /// Finalize a streaming chat — record usage and append daily log.
+    pub fn finalize_chat(
+        &self,
+        session_id: &str,
+        user_text: &str,
+        result_text: &str,
+        result: &agent_sdk::ResultMessage,
+    ) {
+        // Record usage
+        if let Some(u) = &result.usage {
+            let _ = self.session_mgr.record_usage(
+                session_id,
+                &UsageRecord {
+                    input_tokens: u.input_tokens,
+                    output_tokens: u.output_tokens,
+                    cache_read: u.cache_read_input_tokens,
+                    cache_write: u.cache_creation_input_tokens,
+                    cost_usd: result.total_cost_usd,
+                    model: self.config.model.clone(),
+                },
+                result.num_turns,
+            );
+        }
+
+        // Append daily log
+        let summary = if result_text.len() > 200 {
+            format!("{}...", &result_text[..200])
+        } else {
+            result_text.to_string()
+        };
+        let _ = self.memory.append_daily(&format!(
+            "**User**: {}\n**Orion**: {}",
+            truncate(user_text, 200),
+            summary,
+        ));
     }
 
     /// Get a reference to the memory store.
