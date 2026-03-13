@@ -402,6 +402,7 @@ fn derive_vault_key(config: &OrionConfig) -> [u8; 32] {
         .api_key
         .as_deref()
         .or(env_key.as_deref())
+        .filter(|s| !s.is_empty())
         .unwrap_or("orion-default-vault-key-change-me!");
 
     let mut key = [0u8; 32];

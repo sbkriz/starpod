@@ -39,7 +39,21 @@ cd your-project
 orion agent init
 ```
 
-This creates `.orion/config.toml` and `.orion/data/` in the current directory.
+This launches an interactive wizard that sets up your name, timezone, agent personality, model, and optional Telegram bot. It creates `.orion/config.toml` and `.orion/data/` in the current directory.
+
+To skip the wizard and use defaults:
+
+```bash
+orion agent init --default
+```
+
+You can also pass individual settings as flags:
+
+```bash
+orion agent init --name "Alice" --timezone "Europe/Rome" --agent-name "Jarvis" --model "claude-opus-4-6"
+```
+
+Available flags: `--name`, `--timezone`, `--agent-name`, `--soul`, `--model`, `--default` (alias `--skip-onboarding`).
 
 ### Set Your API Key
 
@@ -118,7 +132,9 @@ Config is per-project. Orion walks up from the current directory to find the nea
 ## CLI Reference
 
 ```
-orion agent init                        Initialize .orion/ in current directory
+orion agent init                        Initialize .orion/ (interactive wizard)
+orion agent init --default              Initialize with defaults (no wizard)
+orion agent init --name "..." ...       Initialize with specific settings
 orion agent serve                       Start server (web UI + API + WS + Telegram)
 orion agent chat "<message>"            Send a one-shot message
 orion agent repl                        Interactive REPL session
@@ -178,7 +194,8 @@ API key authentication: set `ORION_API_KEY` env var on the server, then `localSt
 
    Either add it to `.orion/config.toml`:
    ```toml
-   telegram_bot_token = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+   [telegram]
+   bot_token = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
    ```
 
    Or set it as an environment variable:
@@ -186,13 +203,16 @@ API key authentication: set `ORION_API_KEY` env var on the server, then `localSt
    export TELEGRAM_BOT_TOKEN="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
    ```
 
+   **Tip:** `orion agent init` can set this up for you during the interactive wizard.
+
 3. **Restrict access (recommended)**
 
    Send `/start` to your bot — it will reply with your user ID. Add it to `.orion/config.toml`:
    ```toml
-   telegram_allowed_users = [123456789]
+   [telegram]
+   allowed_users = [123456789]
    ```
-   Multiple users: `telegram_allowed_users = [123456789, 987654321]`
+   Multiple users: `allowed_users = [123456789, 987654321]`
 
    The bot won't respond to anyone until you add at least one user ID. `/start` is the only command that works without being whitelisted (so you can discover your ID).
 
@@ -315,7 +335,7 @@ Markdown-based skill files at `<data_dir>/skills/<name>/SKILL.md`. Skills are in
 
 ### orion-cron
 
-Scheduling system supporting interval (`every_ms`), cron expressions, and one-shot (`at`) schedules. A background scheduler (30s tick) runs jobs through `OrionAgent::chat()` and records run history.
+Scheduling system supporting interval (`every_ms`), cron expressions, and one-shot (`at`) schedules. Cron expressions are evaluated in the user's local timezone when `[user] timezone` is configured (auto-detected during `orion agent init`). A background scheduler (30s tick) runs jobs through `OrionAgent::chat()` and records run history.
 
 ## Development
 
