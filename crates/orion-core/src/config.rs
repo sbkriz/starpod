@@ -40,8 +40,8 @@ pub struct OrionConfig {
     pub telegram_bot_token: Option<String>,
 
     /// Telegram user IDs allowed to interact with the bot.
-    /// If empty, the bot accepts messages from anyone (not recommended).
-    /// Find your user ID by messaging @userinfobot on Telegram.
+    /// If empty, no one can chat (only /start works to show the user their ID).
+    /// Find your user ID by sending /start to the bot or messaging @userinfobot on Telegram.
     #[serde(default)]
     pub telegram_allowed_users: Vec<u64>,
 
@@ -182,8 +182,8 @@ server_addr = "127.0.0.1:3000"
 # Telegram bot token (or set TELEGRAM_BOT_TOKEN env var)
 # telegram_bot_token = ""
 
-# Telegram user IDs allowed to use the bot (empty = allow anyone)
-# Find your ID by messaging @userinfobot on Telegram
+# Telegram user IDs allowed to use the bot (empty = no one can chat)
+# Send /start to the bot to get your user ID, then add it here
 # telegram_allowed_users = [123456789]
 "#;
 

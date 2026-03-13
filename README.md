@@ -93,7 +93,7 @@ server_addr = "127.0.0.1:3000"
 # Telegram bot token (or set TELEGRAM_BOT_TOKEN env var)
 # telegram_bot_token = "123456:ABC..."
 
-# Telegram user IDs allowed to use the bot (empty = allow anyone)
+# Telegram user IDs allowed to use the bot (empty = no one can chat)
 # telegram_allowed_users = [123456789]
 ```
 
@@ -172,13 +172,13 @@ API key authentication: set `ORION_API_KEY` env var on the server, then `localSt
 
 3. **Restrict access (recommended)**
 
-   Find your Telegram user ID by messaging `@userinfobot` on Telegram. Then add it to `.orion/config.toml`:
+   Send `/start` to your bot — it will reply with your user ID. Add it to `.orion/config.toml`:
    ```toml
    telegram_allowed_users = [123456789]
    ```
    Multiple users: `telegram_allowed_users = [123456789, 987654321]`
 
-   If you skip this, anyone who finds your bot can chat with it.
+   The bot won't respond to anyone until you add at least one user ID. `/start` is the only command that works without being whitelisted (so you can discover your ID).
 
 4. **Start the server**
    ```bash

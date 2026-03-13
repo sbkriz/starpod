@@ -11,7 +11,7 @@ use orion_core::{ChatMessage, OrionConfig};
 /// Maximum Telegram message length.
 const MAX_MSG_LEN: usize = 4096;
 
-/// Allowed user IDs (empty = allow all).
+/// Allowed user IDs (empty = no one can chat, only /start works to show user ID).
 #[derive(Clone)]
 struct AllowedUsers(Arc<HashSet<u64>>);
 
@@ -37,7 +37,7 @@ pub async fn run_with_agent_filtered(
     allowed_users: Vec<u64>,
 ) -> orion_core::Result<()> {
     if allowed_users.is_empty() {
-        warn!("Telegram bot has no allowed_users configured — anyone can chat with it!");
+        warn!("Telegram bot has no allowed_users configured — no one can chat. Send /start to the bot to get your user ID, then add it to telegram_allowed_users in config.toml");
     } else {
         info!(
             allowed_users = ?allowed_users,
@@ -79,21 +79,45 @@ async fn handle_message(
 
     let user_id = msg.from.as_ref().map(|u| u.id.0);
     let chat_id = msg.chat.id;
+    let user_id_str = user_id.map(|id| id.to_string());
 
-    // Check allow-list
-    if !allowed.0.is_empty() {
-        let is_allowed = user_id.map(|id| allowed.0.contains(&id)).unwrap_or(false);
-        if !is_allowed {
-            debug!(
-                user_id = ?user_id,
-                chat_id = %chat_id,
-                "Rejected message from unauthorized user"
-            );
-            return Ok(());
+    // /start always works — it shows the user their ID for config setup
+    if text == "/start" {
+        let mut greeting = "Hello\\! I'm Orion, your personal AI assistant\\.".to_string();
+        if let Some(id) = user_id {
+            greeting.push_str(&format!("\n\nYour user ID: `{}`", id));
+            greeting.push_str("\nAdd this to `telegram_allowed_users` in your config to start chatting\\.");
         }
+        bot.send_message(chat_id, &greeting)
+            .parse_mode(ParseMode::MarkdownV2)
+            .await
+            .or_else(|_| {
+                let fallback = format!(
+                    "Hello! I'm Orion, your personal AI assistant.\n\nYour user ID: {}\nAdd this to telegram_allowed_users in your config to start chatting.",
+                    user_id.map(|id| id.to_string()).unwrap_or_default()
+                );
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(
+                        bot.send_message(chat_id, fallback).send()
+                    )
+                })
+            })
+            .ok();
+        return Ok(());
     }
 
-    let user_id_str = user_id.map(|id| id.to_string());
+    // Check allow-list (empty = no one allowed)
+    let is_allowed = user_id
+        .map(|id| allowed.0.contains(&id))
+        .unwrap_or(false);
+    if !is_allowed {
+        debug!(
+            user_id = ?user_id,
+            chat_id = %chat_id,
+            "Rejected message from unauthorized user"
+        );
+        return Ok(());
+    }
 
     debug!(
         user_id = ?user_id_str,
@@ -101,26 +125,6 @@ async fn handle_message(
         text = %text,
         "Telegram message received"
     );
-
-    // Handle /start command
-    if text == "/start" {
-        let mut greeting = "Hello! I'm Orion, your personal AI assistant. Send me a message to get started.".to_string();
-        if let Some(id) = user_id {
-            greeting.push_str(&format!("\n\nYour user ID: `{}`", id));
-        }
-        bot.send_message(chat_id, greeting)
-            .parse_mode(ParseMode::MarkdownV2)
-            .await
-            .or_else(|_| {
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(
-                        bot.send_message(chat_id, "Hello! I'm Orion, your personal AI assistant. Send me a message to get started.").send()
-                    )
-                })
-            })
-            .ok();
-        return Ok(());
-    }
 
     // Show typing indicator
     bot.send_chat_action(chat_id, teloxide::types::ChatAction::Typing)
