@@ -10,6 +10,11 @@
 - [x] **Telegram bot** — `orion-telegram` crate with teloxide, auto-starts alongside gateway when token configured
 - [x] **Background Bash** — `run_in_background` support for Bash tool so long-running processes don't block
 - [x] **Local-first CLI restructure** — `orion agent {init, serve, chat, repl}` + `orion instance {create, list, kill, pause, restart}` stubs. Config from `.orion/config.toml` per-project, no global config.
+- [x] **Agent identity** — `[identity]` config section with `name`, `emoji`, `soul` (personality). Injected into system prompt and used in Telegram /start, CLI header, daily logs.
+- [x] **User profile** — `[user]` config section with `name`, `timezone`. Injected into system prompt for personalized responses.
+- [x] **Reasoning effort** — `reasoning_effort` config option (low/medium/high) maps to extended thinking budget tokens. Wired through agent-sdk to Claude API.
+- [x] **Multi-provider config** — `[providers]` config section with per-provider `api_key`, `base_url`, `models`, `enabled`. `provider` field selects active provider. Currently only Anthropic is implemented.
+- [x] **Telegram streaming** — Edit-in-place mode (`stream_mode = "edit_in_place"`) with configurable throttle (`edit_throttle_ms`). Falls back to blocking mode by default.
 
 ## Planned
 
@@ -29,8 +34,7 @@
 - [ ] **Conversation compression** — Summarize old turns to stay within context window on long sessions
 - [ ] **Conversation history / context carry-over** — Load previous session context into new sessions for continuity
 - [ ] **Group followup messages** — Batch rapid user messages into a single agent turn
-- [ ] **Multi-provider support** — Trait-based LLM provider abstraction (OpenAI, Gemini, DeepSeek, Ollama, etc.) with per-project model switching
-- [ ] **Streaming for Telegram** — Send partial responses as edits instead of waiting for full response
+- [ ] **Multi-provider implementation** — Trait-based LLM provider abstraction (OpenAI, Gemini, DeepSeek, Ollama, etc.) with runtime provider switching. Config structure is ready.
 - [ ] **File attachments** — Support image/file uploads in web UI and Telegram (vision, document analysis)
 - [ ] **MCP (Model Context Protocol) support** — Allow connecting external MCP servers as tool providers
 
@@ -39,9 +43,11 @@
 - [ ] **Sandboxed execution** — Docker / Apple Container sandboxing for command execution
 - [ ] **Metrics & tracing** — Prometheus metrics, OpenTelemetry tracing for observability
 - [ ] **Rate limiting & auth** — Per-IP throttling, proper login/session auth beyond optional API key
-- [ ] **Multi-channel access** — Discord, Slack integrations alongside existing HTTP/WS + CLI + Telegram
+- [ ] **Multi-channel access** — Discord, Slack, WhatsApp integrations alongside existing HTTP/WS + CLI + Telegram
 - [ ] **Persistent agent mode** — Long-running daemon that watches files/events and acts proactively (not just on user messages)
 - [ ] **Plugin system** — Load custom tools from external crates or WASM modules at runtime
+- [ ] **Provider failover** — Automatic failover to backup provider when primary is down or rate-limited
+- [ ] **Voice support** — TTS/STT integration for voice interaction (ElevenLabs, OpenAI, local Piper)
 
 ### Web UI
 - [ ] **Conversation history sidebar** — Browse and resume past sessions

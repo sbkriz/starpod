@@ -8,6 +8,119 @@ use crate::error::OrionError;
 const PROJECT_DIR: &str = ".orion";
 const CONFIG_FILE: &str = "config.toml";
 
+// ── Sub-config types ─────────────────────────────────────────────────────
+
+/// Agent identity (name, emoji, personality).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IdentityConfig {
+    /// Agent's display name (default: "Orion").
+    pub name: Option<String>,
+    /// Agent's emoji/avatar (e.g. "🤖").
+    pub emoji: Option<String>,
+    /// Freeform personality text injected into system prompt.
+    /// Use this for custom instructions, tone, or behavior.
+    pub soul: Option<String>,
+}
+
+impl IdentityConfig {
+    /// The resolved agent name (falls back to "Orion").
+    pub fn display_name(&self) -> &str {
+        self.name.as_deref().unwrap_or("Orion")
+    }
+}
+
+/// User profile (set during onboarding or in config).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UserConfig {
+    /// User's name (used in conversations).
+    pub name: Option<String>,
+    /// User's timezone (IANA format, e.g. "Europe/Rome").
+    pub timezone: Option<String>,
+}
+
+/// Reasoning effort level for models that support extended thinking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    Low,
+    Medium,
+    High,
+}
+
+/// Configuration for a single LLM provider.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProviderConfig {
+    /// Whether this provider is enabled.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// API key (or use the corresponding env var).
+    pub api_key: Option<String>,
+    /// Override API endpoint.
+    pub base_url: Option<String>,
+    /// Preferred models shown first.
+    #[serde(default)]
+    pub models: Vec<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Multi-provider configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProvidersConfig {
+    pub anthropic: Option<ProviderConfig>,
+    pub openai: Option<ProviderConfig>,
+    pub gemini: Option<ProviderConfig>,
+    pub groq: Option<ProviderConfig>,
+    pub deepseek: Option<ProviderConfig>,
+    pub openrouter: Option<ProviderConfig>,
+    pub ollama: Option<ProviderConfig>,
+}
+
+/// Telegram-specific configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TelegramConfig {
+    /// Bot token from @BotFather.
+    pub bot_token: Option<String>,
+    /// User IDs allowed to interact with the bot.
+    /// If empty, no one can chat (only /start works to show the user their ID).
+    #[serde(default)]
+    pub allowed_users: Vec<u64>,
+    /// Streaming mode: "edit_in_place" or "off" (default: "off").
+    #[serde(default = "default_stream_mode")]
+    pub stream_mode: String,
+    /// Minimum interval between edit-in-place updates (ms).
+    #[serde(default = "default_edit_throttle_ms")]
+    pub edit_throttle_ms: u64,
+}
+
+impl Default for TelegramConfig {
+    fn default() -> Self {
+        Self {
+            bot_token: None,
+            allowed_users: Vec::new(),
+            stream_mode: default_stream_mode(),
+            edit_throttle_ms: default_edit_throttle_ms(),
+        }
+    }
+}
+
+fn default_stream_mode() -> String {
+    "off".to_string()
+}
+
+fn default_edit_throttle_ms() -> u64 {
+    300
+}
+
+// ── Main config ──────────────────────────────────────────────────────────
+
 /// Main configuration for Orion, loaded from `.orion/config.toml` in the current directory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrionConfig {
@@ -23,6 +136,10 @@ pub struct OrionConfig {
     #[serde(default = "default_server_addr")]
     pub server_addr: String,
 
+    /// Active LLM provider (default: "anthropic").
+    #[serde(default = "default_provider")]
+    pub provider: String,
+
     /// Claude model to use
     #[serde(default = "default_model")]
     pub model: String,
@@ -31,17 +148,38 @@ pub struct OrionConfig {
     #[serde(default = "default_max_turns")]
     pub max_turns: u32,
 
-    /// Anthropic API key (if not set via ANTHROPIC_API_KEY env var)
+    /// Anthropic API key (if not set via ANTHROPIC_API_KEY env var).
+    /// Shorthand for `[providers.anthropic] api_key`.
     #[serde(default)]
     pub api_key: Option<String>,
 
-    /// Telegram bot token (from @BotFather). If set, `orion agent serve` also starts the Telegram bot.
+    /// Reasoning effort for extended thinking (low, medium, high).
+    #[serde(default)]
+    pub reasoning_effort: Option<ReasoningEffort>,
+
+    /// Agent identity (name, emoji, personality).
+    #[serde(default)]
+    pub identity: IdentityConfig,
+
+    /// User profile.
+    #[serde(default)]
+    pub user: UserConfig,
+
+    /// Multi-provider configuration.
+    #[serde(default)]
+    pub providers: ProvidersConfig,
+
+    /// Telegram bot configuration.
+    #[serde(default)]
+    pub telegram: TelegramConfig,
+
+    // ── Legacy flat fields (still supported, prefer [telegram] section) ──
+
+    /// Legacy: Telegram bot token. Prefer `[telegram] bot_token`.
     #[serde(default)]
     pub telegram_bot_token: Option<String>,
 
-    /// Telegram user IDs allowed to interact with the bot.
-    /// If empty, no one can chat (only /start works to show the user their ID).
-    /// Find your user ID by sending /start to the bot or messaging @userinfobot on Telegram.
+    /// Legacy: Telegram allowed users. Prefer `[telegram] allowed_users`.
     #[serde(default)]
     pub telegram_allowed_users: Vec<u64>,
 
@@ -52,6 +190,10 @@ pub struct OrionConfig {
 
 fn default_server_addr() -> String {
     "127.0.0.1:3000".to_string()
+}
+
+fn default_provider() -> String {
+    "anthropic".to_string()
 }
 
 fn default_model() -> String {
@@ -68,9 +210,15 @@ impl Default for OrionConfig {
             data_dir: PathBuf::new(),
             db_path: None,
             server_addr: default_server_addr(),
+            provider: default_provider(),
             model: default_model(),
             max_turns: default_max_turns(),
             api_key: None,
+            reasoning_effort: None,
+            identity: IdentityConfig::default(),
+            user: UserConfig::default(),
+            providers: ProvidersConfig::default(),
+            telegram: TelegramConfig::default(),
             telegram_bot_token: None,
             telegram_allowed_users: Vec::new(),
             project_root: PathBuf::new(),
@@ -114,6 +262,14 @@ impl OrionConfig {
             config.data_dir = config.project_root.join(&config.data_dir);
         }
 
+        // Merge legacy telegram fields into [telegram] section
+        if config.telegram.bot_token.is_none() && config.telegram_bot_token.is_some() {
+            config.telegram.bot_token = config.telegram_bot_token.clone();
+        }
+        if config.telegram.allowed_users.is_empty() && !config.telegram_allowed_users.is_empty() {
+            config.telegram.allowed_users = config.telegram_allowed_users.clone();
+        }
+
         Ok(config)
     }
 
@@ -131,6 +287,35 @@ impl OrionConfig {
             .map_err(|e| OrionError::Config(format!("Invalid config TOML: {}", e)))?;
 
         Ok(config)
+    }
+
+    /// Resolved Anthropic API key: checks providers.anthropic.api_key, then top-level api_key,
+    /// then ANTHROPIC_API_KEY env var.
+    pub fn resolved_api_key(&self) -> Option<String> {
+        self.providers
+            .anthropic
+            .as_ref()
+            .and_then(|p| p.api_key.clone())
+            .or_else(|| self.api_key.clone())
+            .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
+    }
+
+    /// Resolved Telegram bot token: checks [telegram] section, then legacy field, then env var.
+    pub fn resolved_telegram_token(&self) -> Option<String> {
+        self.telegram
+            .bot_token
+            .clone()
+            .or_else(|| self.telegram_bot_token.clone())
+            .or_else(|| std::env::var("TELEGRAM_BOT_TOKEN").ok())
+    }
+
+    /// Resolved Telegram allowed users: prefers [telegram] section, falls back to legacy.
+    pub fn resolved_telegram_allowed_users(&self) -> &[u64] {
+        if !self.telegram.allowed_users.is_empty() {
+            &self.telegram.allowed_users
+        } else {
+            &self.telegram_allowed_users
+        }
     }
 
     /// Resolved database path (uses `db_path` if set, otherwise `<data_dir>/memory.db`).
@@ -167,7 +352,14 @@ impl OrionConfig {
         let config_content = r#"# Orion agent configuration
 # See: https://github.com/gventuri/orion-rs
 
-# Claude model to use
+# ══════════════════════════════════════════════════════════════════════════════
+# GENERAL
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Active LLM provider ("anthropic", "openai", etc.)
+provider = "anthropic"
+
+# Model to use
 model = "claude-haiku-4-5"
 
 # Maximum agentic turns per request
@@ -179,12 +371,52 @@ server_addr = "127.0.0.1:3000"
 # Anthropic API key (or set ANTHROPIC_API_KEY env var)
 # api_key = ""
 
-# Telegram bot token (or set TELEGRAM_BOT_TOKEN env var)
-# telegram_bot_token = ""
+# Reasoning effort for extended thinking: "low", "medium", "high"
+# reasoning_effort = "medium"
 
-# Telegram user IDs allowed to use the bot (empty = no one can chat)
-# Send /start to the bot to get your user ID, then add it here
-# telegram_allowed_users = [123456789]
+# ══════════════════════════════════════════════════════════════════════════════
+# AGENT IDENTITY
+# ══════════════════════════════════════════════════════════════════════════════
+# Customize your agent's personality.
+
+[identity]
+# name = "Orion"                  # Agent's display name
+# emoji = "🤖"                    # Agent's emoji/avatar
+# soul = ""                       # Freeform personality text injected into system prompt
+                                  # Use this for custom instructions, tone, or behavior
+
+# ══════════════════════════════════════════════════════════════════════════════
+# USER PROFILE
+# ══════════════════════════════════════════════════════════════════════════════
+# Information about you.
+
+[user]
+# name = "Your Name"              # Your name (used in conversations)
+# timezone = "America/New_York"   # Your timezone (IANA format)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LLM PROVIDERS
+# ══════════════════════════════════════════════════════════════════════════════
+# Configure API keys and settings for each LLM provider.
+# Each provider supports: enabled, api_key, base_url, models
+
+# [providers.anthropic]
+# api_key = "sk-ant-..."                      # Or set ANTHROPIC_API_KEY env var
+# base_url = "https://api.anthropic.com"
+
+# [providers.openai]
+# api_key = "sk-..."                          # Or set OPENAI_API_KEY env var
+# models = ["gpt-4o", "gpt-4o-mini"]
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TELEGRAM
+# ══════════════════════════════════════════════════════════════════════════════
+
+[telegram]
+# bot_token = "123456:ABC..."     # Or set TELEGRAM_BOT_TOKEN env var
+# allowed_users = [123456789]     # User IDs allowed to chat (empty = no one)
+# stream_mode = "off"             # "edit_in_place" or "off"
+# edit_throttle_ms = 300          # Min interval between streaming edits
 "#;
 
         tokio::fs::write(orion_dir.join(CONFIG_FILE), config_content)

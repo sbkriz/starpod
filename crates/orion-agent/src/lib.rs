@@ -7,7 +7,8 @@ use tokio_stream::StreamExt;
 use tracing::{debug, error};
 
 use agent_sdk::{ExternalToolHandlerFn, Message, Options, PermissionMode, Query};
-use agent_sdk::options::SystemPrompt;
+use agent_sdk::options::{SystemPrompt, ThinkingConfig};
+use orion_core::ReasoningEffort;
 
 use orion_core::{ChatMessage, ChatResponse, ChatUsage, OrionConfig, OrionError, Result};
 use orion_cron::CronStore;
@@ -67,19 +68,34 @@ impl OrionAgent {
         })
     }
 
-    /// Build the system prompt from bootstrap context + skills.
+    /// Build the system prompt from bootstrap context + skills + identity + user.
     fn build_system_prompt(&self, session_id: &str) -> Result<String> {
+        let agent_name = self.config.identity.display_name();
         let bootstrap = self.memory.bootstrap_context()?;
         let skills_ctx = self.skills.bootstrap_skills()?;
         let date_str = Local::now().format("%A, %B %d, %Y at %H:%M").to_string();
 
         let mut prompt = format!(
-            "{}\n\n---\nCurrent date/time: {}\nSession ID: {}\n\
+            "You are {agent_name}, a personal AI assistant.\n\n{bootstrap}\n\n---\nCurrent date/time: {date_str}\nSession ID: {session_id}\n\
              You have access to memory tools (MemorySearch, MemoryWrite, MemoryAppendDaily), \
              vault tools (VaultGet, VaultSet), skill tools (SkillCreate, SkillUpdate, SkillDelete, SkillList), \
              and scheduling tools (CronAdd, CronList, CronRemove, CronRuns).",
-            bootstrap, date_str, session_id,
         );
+
+        // Inject agent personality
+        if let Some(ref soul) = self.config.identity.soul {
+            if !soul.is_empty() {
+                prompt.push_str(&format!("\n\nPersonality: {soul}"));
+            }
+        }
+
+        // Inject user context
+        if let Some(ref name) = self.config.user.name {
+            prompt.push_str(&format!("\nUser's name: {name}"));
+        }
+        if let Some(ref tz) = self.config.user.timezone {
+            prompt.push_str(&format!("\nUser's timezone: {tz}"));
+        }
 
         if !skills_ctx.is_empty() {
             prompt.push_str("\n\n");
@@ -87,6 +103,15 @@ impl OrionAgent {
         }
 
         Ok(prompt)
+    }
+
+    /// Map reasoning effort config to ThinkingConfig.
+    fn thinking_config(&self) -> Option<ThinkingConfig> {
+        self.config.reasoning_effort.map(|effort| match effort {
+            ReasoningEffort::Low => ThinkingConfig::Enabled { budget_tokens: 4096 },
+            ReasoningEffort::Medium => ThinkingConfig::Enabled { budget_tokens: 10240 },
+            ReasoningEffort::High => ThinkingConfig::Enabled { budget_tokens: 32768 },
+        })
     }
 
     /// Build the allowed tools list (built-in + custom).
@@ -135,7 +160,7 @@ impl OrionAgent {
         let system_prompt = self.build_system_prompt(&session_id)?;
 
         // Step 3: Build options and run query
-        let options = Options::builder()
+        let mut builder = Options::builder()
             .allowed_tools(Self::allowed_tools())
             .system_prompt(SystemPrompt::Custom(system_prompt))
             .permission_mode(PermissionMode::BypassPermissions)
@@ -143,8 +168,13 @@ impl OrionAgent {
             .max_turns(self.config.max_turns)
             .session_id(session_id.clone())
             .external_tool_handler(self.build_tool_handler())
-            .custom_tools(custom_tool_definitions())
-            .build();
+            .custom_tools(custom_tool_definitions());
+
+        if let Some(thinking) = self.thinking_config() {
+            builder = builder.thinking(thinking);
+        }
+
+        let options = builder.build();
 
         let mut stream = agent_sdk::query(&message.text, options);
 
@@ -214,8 +244,9 @@ impl OrionAgent {
         } else {
             result_text.clone()
         };
+        let agent_name = self.config.identity.display_name();
         let _ = self.memory.append_daily(&format!(
-            "**User**: {}\n**Orion**: {}",
+            "**User**: {}\n**{agent_name}**: {}",
             truncate(&message.text, 200),
             summary,
         )).await;
@@ -247,7 +278,7 @@ impl OrionAgent {
 
         let system_prompt = self.build_system_prompt(&session_id)?;
 
-        let options = Options::builder()
+        let mut builder = Options::builder()
             .allowed_tools(Self::allowed_tools())
             .system_prompt(SystemPrompt::Custom(system_prompt))
             .permission_mode(PermissionMode::BypassPermissions)
@@ -255,8 +286,13 @@ impl OrionAgent {
             .max_turns(self.config.max_turns)
             .session_id(session_id.clone())
             .external_tool_handler(self.build_tool_handler())
-            .custom_tools(custom_tool_definitions())
-            .build();
+            .custom_tools(custom_tool_definitions());
+
+        if let Some(thinking) = self.thinking_config() {
+            builder = builder.thinking(thinking);
+        }
+
+        let options = builder.build();
 
         let stream = agent_sdk::query(message, options);
         Ok((stream, session_id))
@@ -290,8 +326,9 @@ impl OrionAgent {
         } else {
             result_text.to_string()
         };
+        let agent_name = self.config.identity.display_name();
         let _ = self.memory.append_daily(&format!(
-            "**User**: {}\n**Orion**: {}",
+            "**User**: {}\n**{agent_name}**: {}",
             truncate(user_text, 200),
             summary,
         )).await;
@@ -320,6 +357,11 @@ impl OrionAgent {
     /// Get a reference to the cron store.
     pub fn cron(&self) -> &Arc<CronStore> {
         &self.cron
+    }
+
+    /// Get a reference to the config.
+    pub fn config(&self) -> &OrionConfig {
+        &self.config
     }
 
     /// Start the cron scheduler as a background task.

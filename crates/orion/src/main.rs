@@ -263,16 +263,23 @@ fn tool_input_preview(name: &str, input: &serde_json::Value) -> String {
     }
 }
 
-fn print_header() {
+fn print_header_with_name(name: &str) {
+    let label = format!("{}  ·  AI Assistant", name);
+    let pad_total = 42_usize.saturating_sub(label.len());
+    let pad_left = pad_total / 2;
+    let pad_right = pad_total - pad_left;
+    let inner = format!(
+        "  │{}{}{} │",
+        " ".repeat(pad_left),
+        label,
+        " ".repeat(pad_right)
+    );
     println!();
     println!(
         "{}",
         "  ╭──────────────────────────────────────────╮".bright_cyan()
     );
-    println!(
-        "{}",
-        "  │          Orion  ·  AI Assistant           │".bright_cyan()
-    );
+    println!("{}", inner.bright_cyan());
     println!(
         "{}",
         "  ╰──────────────────────────────────────────╯".bright_cyan()
@@ -474,18 +481,16 @@ async fn main() -> anyhow::Result<()> {
             AgentCommand::Serve => {
                 let config = OrionConfig::load().await?;
                 let addr = &config.server_addr;
+                let agent_name = config.identity.display_name().to_string();
                 let agent = Arc::new(OrionAgent::new(config.clone()).await?);
 
                 // Start Telegram bot in background if token is configured
-                let telegram_token = config
-                    .telegram_bot_token
-                    .clone()
-                    .or_else(|| std::env::var("TELEGRAM_BOT_TOKEN").ok());
+                let telegram_token = config.resolved_telegram_token();
 
                 let telegram_active = telegram_token.is_some();
                 if let Some(token) = telegram_token {
                     let tg_agent = Arc::clone(&agent);
-                    let allowed = config.telegram_allowed_users.clone();
+                    let allowed = config.resolved_telegram_allowed_users().to_vec();
                     tokio::spawn(async move {
                         if let Err(e) =
                             orion_telegram::run_with_agent_filtered(tg_agent, token, allowed).await
@@ -499,7 +504,7 @@ async fn main() -> anyhow::Result<()> {
                 println!();
                 println!(
                     "  {} {}",
-                    "Orion".bright_cyan().bold(),
+                    agent_name.bright_cyan().bold(),
                     "is running".bright_white()
                 );
                 println!();
@@ -522,16 +527,29 @@ async fn main() -> anyhow::Result<()> {
                     "  {} {}",
                     "Telegram".dimmed(),
                     if telegram_active {
-                        "connected".green().to_string()
+                        let mode = &config.telegram.stream_mode;
+                        format!("connected (stream: {})", mode).green().to_string()
                     } else {
                         "not configured".yellow().to_string()
                     }
                 );
                 println!(
                     "  {} {}",
+                    "Provider".dimmed(),
+                    config.provider.bright_white()
+                );
+                println!(
+                    "  {} {}",
                     "Model   ".dimmed(),
                     config.model.bright_white()
                 );
+                if let Some(ref effort) = config.reasoning_effort {
+                    println!(
+                        "  {} {:?}",
+                        "Thinking".dimmed(),
+                        effort
+                    );
+                }
                 println!(
                     "  {} {}",
                     "Project ".dimmed(),
@@ -544,7 +562,8 @@ async fn main() -> anyhow::Result<()> {
 
             AgentCommand::Chat { message } => {
                 let config = OrionConfig::load().await?;
-                print_header();
+                let name = config.identity.display_name().to_string();
+                print_header_with_name(&name);
                 let start = Instant::now();
                 let agent = OrionAgent::new(config).await?;
 
@@ -562,7 +581,8 @@ async fn main() -> anyhow::Result<()> {
 
             AgentCommand::Repl => {
                 let config = OrionConfig::load().await?;
-                run_repl(config).await?;
+                let name = config.identity.display_name().to_string();
+                run_repl(config, &name).await?;
             }
         },
 
@@ -772,10 +792,10 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// Interactive REPL mode with rich output.
-async fn run_repl(config: OrionConfig) -> anyhow::Result<()> {
+async fn run_repl(config: OrionConfig, name: &str) -> anyhow::Result<()> {
     let agent = OrionAgent::new(config).await?;
 
-    print_header();
+    print_header_with_name(name);
     println!(
         "  {} Type your message, or {} to quit.\n",
         "│".dimmed(),

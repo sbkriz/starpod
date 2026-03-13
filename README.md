@@ -78,23 +78,39 @@ When you run `orion agent serve`, you'll see:
 Edit `.orion/config.toml`:
 
 ```toml
-# Claude model to use
+# Active LLM provider
+provider = "anthropic"
 model = "claude-haiku-4-5"
-
-# Maximum agentic turns per request
 max_turns = 30
-
-# Server bind address
 server_addr = "127.0.0.1:3000"
+
+# Reasoning effort for extended thinking: "low", "medium", "high"
+# reasoning_effort = "medium"
 
 # Anthropic API key (or set ANTHROPIC_API_KEY env var)
 # api_key = "sk-ant-..."
 
-# Telegram bot token (or set TELEGRAM_BOT_TOKEN env var)
-# telegram_bot_token = "123456:ABC..."
+[identity]
+# name = "Orion"                  # Agent's display name
+# emoji = "🤖"                    # Agent's emoji/avatar
+# soul = ""                       # Freeform personality injected into system prompt
 
-# Telegram user IDs allowed to use the bot (empty = no one can chat)
-# telegram_allowed_users = [123456789]
+[user]
+# name = "Your Name"
+# timezone = "America/New_York"
+
+[providers.anthropic]
+# api_key = "sk-ant-..."          # Or set ANTHROPIC_API_KEY env var
+
+[providers.openai]
+# api_key = "sk-..."              # Not yet implemented
+# models = ["gpt-5-4"]
+
+[telegram]
+# bot_token = "123456:ABC..."     # Or set TELEGRAM_BOT_TOKEN env var
+# allowed_users = [123456789]     # Empty = no one can chat
+# stream_mode = "off"             # "edit_in_place" or "off"
+# edit_throttle_ms = 300
 ```
 
 Config is per-project. Orion walks up from the current directory to find the nearest `.orion/` folder (like git finds `.git/`).
@@ -309,7 +325,7 @@ Scheduling system supporting interval (`every_ms`), cron expressions, and one-sh
 cargo test
 ```
 
-75 unit tests + 2 doc-tests across all crates, zero warnings.
+63 unit tests + 2 doc-tests across all crates, zero warnings.
 
 | Crate | Tests |
 |-------|-------|
@@ -320,7 +336,7 @@ cargo test
 | orion-skills | 9 |
 | orion-cron | 7 |
 | orion-agent | 3 |
-| orion-telegram | 3 |
+| orion-telegram | 4 |
 
 ## License
 

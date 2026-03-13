@@ -19,12 +19,12 @@ use uuid::Uuid;
 
 use crate::client::{
     ApiClient, ApiContentBlock, ApiMessage, CacheControl, CreateMessageRequest, SystemBlock,
-    ToolDefinition,
+    ThinkingParam, ToolDefinition,
 };
 use crate::error::{AgentError, Result};
 use crate::hooks::{HookCallbackMatcher, HookEvent, HookInput};
 use crate::hooks::input::BaseHookInput;
-use crate::options::{Options, PermissionMode};
+use crate::options::{Options, PermissionMode, ThinkingConfig};
 use crate::permissions::{PermissionEvaluator, PermissionVerdict};
 use crate::session::Session;
 use crate::tools::definitions::get_tool_definitions;
@@ -390,10 +390,37 @@ async fn run_agent_loop(
         // user turn), well within the API limit of 4.
         apply_cache_breakpoint(&mut conversation);
 
+        // Build thinking param from options
+        let thinking_param = options.thinking.as_ref().map(|tc| match tc {
+            ThinkingConfig::Adaptive => ThinkingParam {
+                kind: "enabled".into(),
+                budget_tokens: Some(10240),
+            },
+            ThinkingConfig::Disabled => ThinkingParam {
+                kind: "disabled".into(),
+                budget_tokens: None,
+            },
+            ThinkingConfig::Enabled { budget_tokens } => ThinkingParam {
+                kind: "enabled".into(),
+                budget_tokens: Some(*budget_tokens),
+            },
+        });
+
+        // Increase max_tokens when thinking is enabled
+        let max_tokens = if let Some(ref tp) = thinking_param {
+            if let Some(budget) = tp.budget_tokens {
+                DEFAULT_MAX_TOKENS.max(budget as u32 + 8192)
+            } else {
+                DEFAULT_MAX_TOKENS
+            }
+        } else {
+            DEFAULT_MAX_TOKENS
+        };
+
         // Build the API request
         let request = CreateMessageRequest {
             model: model.clone(),
-            max_tokens: DEFAULT_MAX_TOKENS,
+            max_tokens,
             messages: conversation.clone(),
             system: system_prompt.clone(),
             tools: if tool_defs.is_empty() {
@@ -403,7 +430,7 @@ async fn run_agent_loop(
             },
             stream: false,
             metadata: None,
-            thinking: None,
+            thinking: thinking_param,
         };
 
         // Call Claude
