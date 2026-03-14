@@ -37,7 +37,8 @@ function setStatus(state) {
 }
 
 function scrollToBottom() {
-  requestAnimationFrame(() => { messages.scrollTop = messages.scrollHeight })
+  const scroller = document.getElementById('messages-scroll')
+  requestAnimationFrame(() => { scroller.scrollTop = scroller.scrollHeight })
 }
 
 function autoResize() {
@@ -61,14 +62,14 @@ function formatText(text) {
     return '<pre class="bg-bg border border-border-main rounded-lg my-3 overflow-x-auto font-mono text-[13px] leading-relaxed text-secondary">' +
       '<div class="flex items-center justify-between px-3 py-1.5 border-b border-border-subtle text-[11px] text-dim font-mono tracking-wide select-none">' +
         '<span>' + escapeHtml(langLabel) + '</span>' +
-        '<button class="copy-btn bg-transparent border border-border-main text-dim cursor-pointer font-mono text-[11px] px-2 py-0.5 rounded transition-all" onclick="copyCode(this, \'' + codeId + '\')">copy</button>' +
+        '<button class="copy-btn bg-transparent border border-border-main text-dim font-mono text-[11px] px-2 py-0.5 rounded transition-all" onclick="copyCode(this, \'' + codeId + '\')">copy</button>' +
       '</div>' +
-      '<div class="px-4 py-3.5" id="' + codeId + '">' + code + '</div></pre>'
+      '<div class="px-4 py-3" id="' + codeId + '">' + code + '</div></pre>'
   })
-  html = html.replace(/`([^`]+)`/g, '<code class="bg-elevated border border-border-subtle px-1.5 py-0.5 rounded font-mono text-[12.5px] text-accent">$1</code>')
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  html = html.replace(/`([^`]+)`/g, '<code class="bg-elevated border border-border-subtle px-1.5 py-0.5 rounded font-mono text-[12.5px] text-accent-soft">$1</code>')
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="text-primary font-semibold">$1</strong>')
   html = html.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>')
-  html = html.replace(/(?<![="'])(https?:\/\/[^\s<>"')\]]+)/g, '<a href="$1" target="_blank" rel="noopener" class="text-accent no-underline border-b border-accent/30 hover:border-accent transition-colors">$1</a>')
+  html = html.replace(/(?<![="'])(https?:\/\/[^\s<>"')\]]+)/g, '<a href="$1" target="_blank" rel="noopener" class="text-accent-soft underline decoration-accent/30 hover:decoration-accent transition-colors">$1</a>')
   return html
 }
 
@@ -147,12 +148,12 @@ function addUserMessage(text, atts) {
       if (att.mime_type.startsWith('image/')) {
         html += '<img src="data:' + att.mime_type + ';base64,' + att.data + '" class="max-w-[200px] max-h-[200px] rounded-xl object-cover" alt="' + escapeHtml(att.file_name) + '">'
       } else {
-        html += '<div class="bg-white/8 px-2.5 py-1.5 rounded-xl font-mono text-[11px] text-white/70">\u{1F4CE} ' + escapeHtml(att.file_name) + '</div>'
+        html += '<div class="bg-elevated px-2.5 py-1.5 rounded-lg font-mono text-[11px] text-muted border border-border-subtle">' + escapeHtml(att.file_name) + '</div>'
       }
     }
     html += '</div>'
   }
-  if (text) html += '<div class="bg-accent-strong text-white rounded-[18px] rounded-br-[4px] px-4 py-2.5 leading-relaxed text-sm whitespace-pre-wrap break-words">' + escapeHtml(text) + '</div>'
+  if (text) html += '<div class="bg-accent text-white rounded-2xl rounded-br-md px-4 py-2.5 leading-relaxed text-sm whitespace-pre-wrap break-words">' + escapeHtml(text) + '</div>'
   msg.innerHTML = html
   messages.appendChild(msg)
   scrollToBottom()
@@ -166,13 +167,11 @@ function startAssistantMessage() {
   currentBubble = null
   messages.appendChild(msg)
 
-  // Thinking indicator
   const thinking = document.createElement('div')
-  thinking.className = 'flex items-center gap-1.5 py-2 text-dim font-mono text-xs'
+  thinking.className = 'flex items-center gap-1.5 py-2 text-dim text-xs'
   thinking.innerHTML = '<div class="flex gap-1"><span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span></div>'
   msg._thinkingEl = thinking
   msg.appendChild(thinking)
-
   scrollToBottom()
 }
 
@@ -217,17 +216,17 @@ function addToolUse(name, input) {
   const inputJson = JSON.stringify(input, null, 2)
 
   const el = document.createElement('div')
-  el.className = 'my-1 rounded-md overflow-hidden border border-border-subtle bg-surface transition-colors hover:border-border-main'
+  el.className = 'my-1.5 rounded-lg overflow-hidden border border-border-subtle bg-surface transition-colors hover:border-border-main'
   el.id = id
   el.innerHTML =
-    '<div class="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer select-none text-xs text-secondary transition-colors hover:bg-elevated" onclick="toggleTool(\'' + id + '\')">' +
+    '<div class="flex items-center gap-2 px-3 py-2 cursor-pointer select-none text-xs text-secondary transition-colors hover:bg-elevated" onclick="toggleTool(\'' + id + '\')">' +
       '<span class="tool-chevron text-[8px] text-dim transition-transform duration-200 shrink-0 w-3 text-center">\u25B6</span>' +
-      '<span class="' + toolIconClass(name) + ' text-[10px] w-5 h-5 flex items-center justify-center rounded-[5px] shrink-0 font-semibold">' + toolIconSymbol(name) + '</span>' +
-      '<span class="font-mono font-medium text-[11.5px] text-secondary">' + escapeHtml(name) + '</span>' +
+      '<span class="' + toolIconClass(name) + ' text-[10px] w-5 h-5 flex items-center justify-center rounded-md shrink-0 font-semibold">' + toolIconSymbol(name) + '</span>' +
+      '<span class="font-mono font-medium text-[12px] text-secondary">' + escapeHtml(name) + '</span>' +
       '<span class="text-dim font-mono text-[11px] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0">' + escapeHtml(preview) + '</span>' +
-      '<span class="font-mono text-[10px] px-1.5 py-px rounded-full font-medium shrink-0 tracking-wide bg-accent-muted text-accent badge-running">running</span>' +
+      '<span class="font-mono text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 tracking-wide bg-accent-muted text-accent-soft badge-running">running</span>' +
     '</div>' +
-    '<div class="tool-body hidden px-2.5 pb-2.5 text-xs text-secondary">' +
+    '<div class="tool-body hidden px-3 pb-3 text-xs text-secondary">' +
       '<div>' +
         '<div class="font-mono text-[10px] uppercase tracking-widest text-dim mb-1 font-medium">Input</div>' +
         '<pre class="bg-bg border border-border-subtle rounded-md px-3 py-2.5 font-mono text-[11.5px] leading-normal whitespace-pre-wrap break-all text-dim max-h-60 overflow-y-auto">' + escapeHtml(inputJson) + '</pre>' +
@@ -253,10 +252,10 @@ function addToolResult(content, isError) {
 
   if (isError) {
     badge.textContent = 'error'
-    badge.className = 'font-mono text-[10px] px-1.5 py-px rounded-full font-medium shrink-0 tracking-wide bg-err-muted text-err'
+    badge.className = 'font-mono text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 tracking-wide bg-err-muted text-err'
   } else {
     badge.textContent = 'done'
-    badge.className = 'font-mono text-[10px] px-1.5 py-px rounded-full font-medium shrink-0 tracking-wide bg-ok-muted text-ok'
+    badge.className = 'font-mono text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 tracking-wide bg-ok-muted text-ok'
   }
 
   const resultSection = last.querySelector('.tool-result-section')
@@ -265,7 +264,6 @@ function addToolResult(content, isError) {
     resultPre.textContent = content
     resultSection.classList.remove('hidden')
   }
-
   scrollToBottom()
 }
 
@@ -282,8 +280,7 @@ function endStream(data) {
       if (!hasText) {
         const bubble = ensureBubble()
         if (bubble) {
-          bubble.innerHTML = '<span class="text-err">' +
-            data.errors.map(escapeHtml).join('<br>') + '</span>'
+          bubble.innerHTML = '<span class="text-err">' + data.errors.map(escapeHtml).join('<br>') + '</span>'
           bubble.classList.remove('streaming-cursor')
         }
       }
@@ -291,7 +288,7 @@ function endStream(data) {
 
     if (data.num_turns > 0) {
       const stats = document.createElement('div')
-      stats.className = 'font-mono text-[11px] text-dim mt-2 pt-2 flex gap-3 flex-wrap'
+      stats.className = 'font-mono text-[11px] text-dim mt-2 pt-2 border-t border-border-subtle flex gap-3 flex-wrap'
       const tokens_in = data.input_tokens >= 1000 ? Math.round(data.input_tokens / 1000) + 'k' : data.input_tokens
       const tokens_out = data.output_tokens >= 1000 ? Math.round(data.output_tokens / 1000) + 'k' : data.output_tokens
       stats.innerHTML =
@@ -419,8 +416,8 @@ function renderAttachmentPreview() {
     const isImage = att.mime_type.startsWith('image/')
     const thumb = isImage
       ? '<img src="data:' + att.mime_type + ';base64,' + att.data + '" class="w-7 h-7 object-cover rounded shrink-0">'
-      : '<span class="text-sm shrink-0">\u{1F4CE}</span>'
-    return '<div class="flex items-center gap-1.5 bg-elevated border border-border-main rounded-md px-2 py-1 font-mono text-[11px] text-secondary max-w-[200px] transition-colors hover:border-dim">' +
+      : '<span class="text-sm shrink-0 text-dim">\u{1F4CE}</span>'
+    return '<div class="flex items-center gap-1.5 bg-elevated border border-border-main rounded-lg px-2 py-1 font-mono text-[11px] text-secondary max-w-[200px] transition-colors hover:border-dim">' +
       thumb +
       '<span class="overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0">' + escapeHtml(att.file_name) + '</span>' +
       '<button class="bg-transparent border-none text-dim cursor-pointer text-sm leading-none px-0.5 shrink-0 hover:text-err transition-colors" onclick="removeAttachment(' + i + ')">&times;</button>' +
@@ -467,29 +464,36 @@ inputText.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shift
 inputText.addEventListener('input', autoResize)
 
 // ── Sidebar ──
-function toggleSidebar() {
-  const isOpen = document.body.classList.toggle('sidebar-open')
-  sidebarOverlay.classList.toggle('hidden', !isOpen)
-  sidebarOverlay.classList.toggle('opacity-100', isOpen)
-  sidebarOverlay.classList.toggle('opacity-0', !isOpen)
-  if (isOpen) fetchSessions()
+function openSidebar() {
+  sidebar.classList.add('open')
+  if (window.innerWidth <= 768) {
+    sidebarOverlay.classList.remove('hidden')
+    sidebarOverlay.classList.add('active')
+  }
+  fetchSessions()
 }
 
 function closeSidebar() {
-  document.body.classList.remove('sidebar-open')
-  sidebarOverlay.classList.add('hidden', 'opacity-0')
-  sidebarOverlay.classList.remove('opacity-100')
+  sidebar.classList.remove('open')
+  sidebarOverlay.classList.add('hidden')
+  sidebarOverlay.classList.remove('active')
+}
+
+function toggleSidebar() {
+  sidebar.classList.contains('open') ? closeSidebar() : openSidebar()
 }
 
 const welcomeHTML =
-  '<div class="text-center text-dim m-auto py-15 max-w-[420px]" id="welcome">' +
-    '<div class="font-mono text-3xl font-extrabold tracking-tighter mb-2 bg-gradient-to-br from-zinc-100 via-accent to-purple bg-clip-text text-transparent">orion</div>' +
-    '<p class="text-sm leading-relaxed text-dim">Your personal AI assistant</p>' +
-    '<div class="flex gap-4 justify-center mt-6 flex-wrap">' +
-      '<div class="flex items-center gap-1.5 font-mono text-xs text-dim px-3 py-1.5 bg-surface border border-border-subtle rounded-lg">' +
-        '<kbd class="bg-elevated border border-border-main rounded px-1.5 py-0.5 font-mono text-[11px] text-secondary">Enter</kbd> send</div>' +
-      '<div class="flex items-center gap-1.5 font-mono text-xs text-dim px-3 py-1.5 bg-surface border border-border-subtle rounded-lg">' +
-        '<kbd class="bg-elevated border border-border-main rounded px-1.5 py-0.5 font-mono text-[11px] text-secondary">Shift+Enter</kbd> newline</div>' +
+  '<div class="flex items-center justify-center text-center" id="welcome" style="min-height: calc(100dvh - 120px)">' +
+    '<div>' +
+      '<div class="font-mono text-3xl font-extrabold tracking-tighter mb-2 bg-gradient-to-b from-primary to-muted bg-clip-text text-transparent select-none">orion</div>' +
+      '<p class="text-sm text-muted mb-8">What can I help you with?</p>' +
+      '<div class="flex gap-3 justify-center flex-wrap">' +
+        '<div class="flex items-center gap-2 text-xs text-muted px-3 py-1.5 bg-surface border border-border-subtle rounded-lg">' +
+          '<kbd class="bg-elevated border border-border-main rounded px-1.5 py-0.5 font-mono text-[11px] text-secondary">Enter</kbd> <span>send</span></div>' +
+        '<div class="flex items-center gap-2 text-xs text-muted px-3 py-1.5 bg-surface border border-border-subtle rounded-lg">' +
+          '<kbd class="bg-elevated border border-border-main rounded px-1.5 py-0.5 font-mono text-[11px] text-secondary">Shift+Enter</kbd> <span>new line</span></div>' +
+      '</div>' +
     '</div>' +
   '</div>'
 
@@ -528,12 +532,12 @@ function fetchSessions() {
   fetch('/api/sessions?limit=50', { headers })
     .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
     .then(sessions => renderSessions(sessions))
-    .catch(() => { sessionList.innerHTML = '<div class="text-center text-dim text-sm py-6 px-3">Failed to load sessions</div>' })
+    .catch(() => { sessionList.innerHTML = '<div class="text-center text-dim text-xs py-8">Failed to load sessions</div>' })
 }
 
 function renderSessions(sessions) {
   if (!sessions || sessions.length === 0) {
-    sessionList.innerHTML = '<div class="text-center text-dim text-sm py-6 px-3">No conversations yet</div>'
+    sessionList.innerHTML = '<div class="text-center text-dim text-xs py-8">No conversations yet</div>'
     return
   }
 
@@ -541,8 +545,8 @@ function renderSessions(sessions) {
   sessions.forEach(s => {
     const el = document.createElement('div')
     const active = s.id === currentSessionId
-    el.className = 'px-3 py-2.5 rounded-md cursor-pointer transition-colors mb-px border border-transparent' +
-      (active ? ' bg-accent-muted border-accent/15' : ' hover:bg-elevated')
+    el.className = 'session-item px-3.5 py-3 rounded-lg cursor-pointer mb-1' +
+      (active ? ' active' : '')
 
     const summary = s.title || s.summary || 'Untitled conversation'
     const date = formatSessionDate(s.last_message_at || s.created_at)
@@ -550,12 +554,13 @@ function renderSessions(sessions) {
     const closed = s.is_closed ? ' \u00b7 ended' : ''
 
     el.innerHTML =
-      '<div class="text-[13px] leading-snug line-clamp-2 break-words' + (active ? ' text-zinc-100' : ' text-secondary') + '">' + escapeHtml(summary) + '</div>' +
+      '<div class="text-[13px] leading-snug line-clamp-2 break-words' + (active ? ' text-primary font-medium' : ' text-secondary') + '">' + escapeHtml(summary) + '</div>' +
       '<div class="font-mono text-[11px] text-dim mt-1 flex gap-2">' +
         '<span>' + date + '</span>' +
         '<span>' + msgs + ' msg' + (msgs !== 1 ? 's' : '') + closed + '</span>' +
       '</div>'
 
+    el._sessionId = s.id
     el.addEventListener('click', () => selectSession(s))
     sessionList.appendChild(el)
   })
@@ -563,9 +568,12 @@ function renderSessions(sessions) {
 
 function selectSession(session) {
   currentSessionId = session.id
-  closeSidebar()
+  // Update active state in sidebar
+  sessionList.querySelectorAll('.session-item').forEach(el => {
+    el.classList.toggle('active', el._sessionId === session.id)
+  })
 
-  messages.innerHTML = '<div class="text-center text-dim text-sm py-6 px-3">Loading messages...</div>'
+  messages.innerHTML = '<div class="text-center text-dim text-sm py-8">Loading messages...</div>'
 
   const token = localStorage.getItem('orion_api_key')
   const headers = {}
@@ -576,7 +584,7 @@ function selectSession(session) {
     .then(msgs => {
       messages.innerHTML = ''
       if (!msgs || msgs.length === 0) {
-        messages.innerHTML = '<div class="text-center text-dim m-auto py-15" id="welcome"><div class="font-mono text-3xl font-extrabold tracking-tighter mb-2 bg-gradient-to-br from-zinc-100 via-accent to-purple bg-clip-text text-transparent">orion</div><p class="text-sm text-dim">No messages in this conversation.</p></div>'
+        messages.innerHTML = '<div class="flex items-center justify-center text-center" style="min-height: calc(100dvh - 120px)" id="welcome"><div><div class="font-mono text-3xl font-extrabold tracking-tighter mb-2 bg-gradient-to-b from-primary to-muted bg-clip-text text-transparent">orion</div><p class="text-sm text-muted">No messages in this conversation.</p></div></div>'
         return
       }
 
@@ -587,7 +595,7 @@ function selectSession(session) {
           currentAssistantMsg = null
           const el = document.createElement('div')
           el.className = 'max-w-[80%] self-end mt-4'
-          el.innerHTML = '<div class="bg-accent-strong text-white rounded-[18px] rounded-br-[4px] px-4 py-2.5 leading-relaxed text-sm whitespace-pre-wrap break-words">' + escapeHtml(m.content) + '</div>'
+          el.innerHTML = '<div class="bg-accent text-white rounded-2xl rounded-br-md px-4 py-2.5 leading-relaxed text-sm whitespace-pre-wrap break-words">' + escapeHtml(m.content) + '</div>'
           messages.appendChild(el)
         } else if (m.role === 'assistant') {
           const el = document.createElement('div')
@@ -608,17 +616,17 @@ function selectSession(session) {
             const inputJson = JSON.stringify(data.input || {}, null, 2)
 
             const el = document.createElement('div')
-            el.className = 'my-1 rounded-md overflow-hidden border border-border-subtle bg-surface transition-colors hover:border-border-main'
+            el.className = 'my-1.5 rounded-lg overflow-hidden border border-border-subtle bg-surface transition-colors hover:border-border-main'
             el.id = id
             el.innerHTML =
-              '<div class="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer select-none text-xs text-secondary transition-colors hover:bg-elevated" onclick="toggleTool(\'' + id + '\')">' +
+              '<div class="flex items-center gap-2 px-3 py-2 cursor-pointer select-none text-xs text-secondary transition-colors hover:bg-elevated" onclick="toggleTool(\'' + id + '\')">' +
                 '<span class="tool-chevron text-[8px] text-dim transition-transform duration-200 shrink-0 w-3 text-center">\u25B6</span>' +
-                '<span class="' + toolIconClass(data.name) + ' text-[10px] w-5 h-5 flex items-center justify-center rounded-[5px] shrink-0 font-semibold">' + toolIconSymbol(data.name) + '</span>' +
-                '<span class="font-mono font-medium text-[11.5px] text-secondary">' + escapeHtml(data.name) + '</span>' +
+                '<span class="' + toolIconClass(data.name) + ' text-[10px] w-5 h-5 flex items-center justify-center rounded-md shrink-0 font-semibold">' + toolIconSymbol(data.name) + '</span>' +
+                '<span class="font-mono font-medium text-[12px] text-secondary">' + escapeHtml(data.name) + '</span>' +
                 '<span class="text-dim font-mono text-[11px] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0">' + escapeHtml(preview) + '</span>' +
-                '<span class="font-mono text-[10px] px-1.5 py-px rounded-full font-medium shrink-0 tracking-wide bg-ok-muted text-ok">done</span>' +
+                '<span class="font-mono text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 tracking-wide bg-ok-muted text-ok">done</span>' +
               '</div>' +
-              '<div class="tool-body hidden px-2.5 pb-2.5 text-xs text-secondary">' +
+              '<div class="tool-body hidden px-3 pb-3 text-xs text-secondary">' +
                 '<div>' +
                   '<div class="font-mono text-[10px] uppercase tracking-widest text-dim mb-1 font-medium">Input</div>' +
                   '<pre class="bg-bg border border-border-subtle rounded-md px-3 py-2.5 font-mono text-[11.5px] leading-normal whitespace-pre-wrap break-all text-dim max-h-60 overflow-y-auto">' + escapeHtml(inputJson) + '</pre>' +
@@ -636,7 +644,7 @@ function selectSession(session) {
                   const badge = lastTool.querySelector('[class*="bg-ok-muted"]')
                   if (badge) {
                     badge.textContent = 'error'
-                    badge.className = 'font-mono text-[10px] px-1.5 py-px rounded-full font-medium shrink-0 tracking-wide bg-err-muted text-err'
+                    badge.className = 'font-mono text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 tracking-wide bg-err-muted text-err'
                   }
                 }
                 if (data.content) {
@@ -658,7 +666,7 @@ function selectSession(session) {
       scrollToBottom()
     })
     .catch(() => {
-      messages.innerHTML = '<div class="text-center text-dim m-auto py-15" id="welcome"><div class="font-mono text-3xl font-extrabold tracking-tighter mb-2 bg-gradient-to-br from-zinc-100 via-accent to-purple bg-clip-text text-transparent">orion</div><p class="text-sm text-dim">Failed to load messages.</p></div>'
+      messages.innerHTML = '<div class="flex items-center justify-center text-center" style="min-height: calc(100dvh - 120px)" id="welcome"><div><div class="font-mono text-3xl font-extrabold tracking-tighter mb-2 bg-gradient-to-b from-primary to-muted bg-clip-text text-transparent">orion</div><p class="text-sm text-muted">Failed to load messages.</p></div></div>'
     })
 
   inputText.focus()
@@ -667,7 +675,7 @@ function selectSession(session) {
 // ── Keyboard shortcuts ──
 document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); inputText.focus() }
-  if (e.key === 'Escape' && document.body.classList.contains('sidebar-open')) closeSidebar()
+  if (e.key === 'Escape' && sidebar.classList.contains('open')) closeSidebar()
 })
 
 // ── Init ──
