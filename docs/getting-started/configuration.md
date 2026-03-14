@@ -56,6 +56,12 @@ server_addr = "127.0.0.1:3000"   # HTTP/WS server bind address
 [providers.ollama]
 # base_url = "http://localhost:11434/v1/chat/completions"  # No API key needed
 
+# ─── Attachments ──────────────────────────────────────
+[attachments]
+# enabled = true                   # Set to false to disable attachments
+# allowed_extensions = []          # e.g. ["jpg", "png", "pdf"]; empty = all
+# max_file_size = 20971520         # Max file size in bytes (default: 20 MB)
+
 # ─── Instances ─────────────────────────────────────────
 # instance_backend_url = "https://api.starpod.example.com"  # Or set STARPOD_INSTANCE_BACKEND_URL env var
 
@@ -128,6 +134,35 @@ Never commit API keys to version control. Use environment variables or add `.sta
 | `allowed_users` | array | `[]` | User ID allowlist |
 | `stream_mode` | string | `"final_only"` | `"final_only"` or `"all_messages"` |
 | `edit_throttle_ms` | integer | `300` | Edit-in-place throttle |
+
+## Attachments
+
+The `[attachments]` section controls file upload handling across all channels (WebSocket, Telegram, API).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | bool | `true` | Set to `false` to reject all file uploads |
+| `allowed_extensions` | array | `[]` | Allowed extensions (e.g. `["jpg", "png", "pdf"]`). Empty = all allowed |
+| `max_file_size` | integer | `20971520` (20 MB) | Maximum file size in bytes |
+
+Extension matching is case-insensitive (`"jpg"` matches `photo.JPG`).
+
+**Examples:**
+
+Disable attachments entirely:
+
+```toml
+[attachments]
+enabled = false
+```
+
+Allow only images and PDFs, max 5 MB:
+
+```toml
+[attachments]
+allowed_extensions = ["jpg", "jpeg", "png", "gif", "webp", "pdf"]
+max_file_size = 5242880
+```
 
 ## Environment Variables
 

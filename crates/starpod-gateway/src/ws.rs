@@ -221,20 +221,14 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                 attachments,
             } => {
                 // Validate and convert attachments
+                let att_config = &state.config.attachments;
                 let mut chat_attachments = Vec::new();
                 for att in attachments {
-                    // Check size (approximate raw size from base64)
                     let raw_size = att.data.len() * 3 / 4;
-                    if raw_size > starpod_core::MAX_ATTACHMENT_SIZE {
+                    if let Err(reason) = att_config.validate(&att.file_name, raw_size) {
                         let _ = send_msg(
                             &mut sender,
-                            &ServerMessage::Error {
-                                message: format!(
-                                    "File '{}' exceeds 20 MB limit ({:.1} MB)",
-                                    att.file_name,
-                                    raw_size as f64 / 1_048_576.0
-                                ),
-                            },
+                            &ServerMessage::Error { message: reason },
                         )
                         .await;
                         continue;

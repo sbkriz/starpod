@@ -157,6 +157,74 @@ fn default_stream_mode() -> String {
     "final_only".to_string()
 }
 
+/// Attachment handling configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AttachmentsConfig {
+    /// Whether file attachments are accepted (default: true).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Allowed file extensions (e.g. ["jpg", "png", "pdf"]).
+    /// Empty list means all extensions are allowed.
+    #[serde(default)]
+    pub allowed_extensions: Vec<String>,
+
+    /// Maximum file size in bytes (default: 20 MB).
+    #[serde(default = "default_max_file_size")]
+    pub max_file_size: usize,
+}
+
+fn default_max_file_size() -> usize {
+    20 * 1024 * 1024 // 20 MB
+}
+
+impl Default for AttachmentsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            allowed_extensions: Vec::new(),
+            max_file_size: default_max_file_size(),
+        }
+    }
+}
+
+impl AttachmentsConfig {
+    /// Check whether an attachment is allowed by this config.
+    /// Returns `Ok(())` if allowed, or `Err(reason)` if rejected.
+    pub fn validate(&self, file_name: &str, raw_size: usize) -> Result<(), String> {
+        if !self.enabled {
+            return Err("Attachments are disabled".to_string());
+        }
+
+        if raw_size > self.max_file_size {
+            return Err(format!(
+                "File '{}' exceeds {:.1} MB limit ({:.1} MB)",
+                file_name,
+                self.max_file_size as f64 / 1_048_576.0,
+                raw_size as f64 / 1_048_576.0,
+            ));
+        }
+
+        if !self.allowed_extensions.is_empty() {
+            let ext = file_name
+                .rsplit('.')
+                .next()
+                .unwrap_or("")
+                .to_lowercase();
+            if !self.allowed_extensions.iter().any(|e| e.to_lowercase() == ext) {
+                return Err(format!(
+                    "File extension '{}' is not allowed (allowed: {})",
+                    ext,
+                    self.allowed_extensions.join(", "),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
 // ── Main config ──────────────────────────────────────────────────────────
 
 /// Main configuration for Starpod, loaded from `.starpod/config.toml` in the current directory.
@@ -217,6 +285,10 @@ pub struct StarpodConfig {
     #[serde(default)]
     pub followup_mode: FollowupMode,
 
+    /// Attachment handling settings.
+    #[serde(default)]
+    pub attachments: AttachmentsConfig,
+
     /// Remote instance backend URL (e.g. "https://api.starpod.example.com").
     /// If set, `starpod instance` commands will connect to this backend.
     #[serde(default)]
@@ -259,6 +331,7 @@ impl Default for StarpodConfig {
             user: UserConfig::default(),
             providers: ProvidersConfig::default(),
             telegram: TelegramConfig::default(),
+            attachments: AttachmentsConfig::default(),
             instance_backend_url: None,
             project_root: PathBuf::new(),
         }
@@ -534,6 +607,17 @@ server_addr = "127.0.0.1:3000"
 # stream_mode = "final_only"      # "final_only" or "all_messages"
 
 # ══════════════════════════════════════════════════════════════════════════════
+# ATTACHMENTS
+# ══════════════════════════════════════════════════════════════════════════════
+# Control file attachment handling.
+
+[attachments]
+# enabled = true                   # Set to false to disable attachments entirely
+# allowed_extensions = []          # Allowed file extensions, e.g. ["jpg", "png", "pdf"]
+                                   # Empty list = all extensions allowed
+# max_file_size = 20971520         # Max file size in bytes (default: 20 MB)
+
+# ══════════════════════════════════════════════════════════════════════════════
 # INSTANCES
 # ══════════════════════════════════════════════════════════════════════════════
 # Remote instance backend for `starpod instance` commands.
@@ -720,5 +804,92 @@ mod tests {
         let config = StarpodConfig::default();
         // Ollama doesn't require an API key, returns empty string
         assert_eq!(config.resolved_provider_api_key("ollama"), Some(String::new()));
+    }
+
+    // ── Attachments config tests ─────────────────────────────────────────
+
+    #[test]
+    fn attachments_default_allows_everything() {
+        let cfg = AttachmentsConfig::default();
+        assert!(cfg.enabled);
+        assert!(cfg.allowed_extensions.is_empty());
+        assert_eq!(cfg.max_file_size, 20 * 1024 * 1024);
+        assert!(cfg.validate("anything.zip", 1024).is_ok());
+    }
+
+    #[test]
+    fn attachments_disabled_rejects_all() {
+        let cfg = AttachmentsConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        assert!(cfg.validate("photo.jpg", 100).is_err());
+    }
+
+    #[test]
+    fn attachments_max_file_size_enforced() {
+        let cfg = AttachmentsConfig {
+            max_file_size: 1000,
+            ..Default::default()
+        };
+        assert!(cfg.validate("small.txt", 999).is_ok());
+        assert!(cfg.validate("small.txt", 1000).is_ok());
+        assert!(cfg.validate("big.txt", 1001).is_err());
+    }
+
+    #[test]
+    fn attachments_allowed_extensions_filter() {
+        let cfg = AttachmentsConfig {
+            allowed_extensions: vec!["jpg".into(), "png".into(), "pdf".into()],
+            ..Default::default()
+        };
+        assert!(cfg.validate("photo.jpg", 100).is_ok());
+        assert!(cfg.validate("photo.PNG", 100).is_ok()); // case-insensitive
+        assert!(cfg.validate("doc.pdf", 100).is_ok());
+        assert!(cfg.validate("script.exe", 100).is_err());
+        assert!(cfg.validate("noext", 100).is_err());
+    }
+
+    #[test]
+    fn attachments_empty_extensions_allows_all() {
+        let cfg = AttachmentsConfig {
+            allowed_extensions: vec![],
+            ..Default::default()
+        };
+        assert!(cfg.validate("anything.exe", 100).is_ok());
+        assert!(cfg.validate("noext", 100).is_ok());
+    }
+
+    #[test]
+    fn attachments_from_toml() {
+        let toml = r#"
+            [attachments]
+            enabled = true
+            allowed_extensions = ["jpg", "png"]
+            max_file_size = 5242880
+        "#;
+        let config: StarpodConfig = toml::from_str(toml).unwrap();
+        assert!(config.attachments.enabled);
+        assert_eq!(config.attachments.allowed_extensions, vec!["jpg", "png"]);
+        assert_eq!(config.attachments.max_file_size, 5 * 1024 * 1024);
+    }
+
+    #[test]
+    fn attachments_from_toml_disabled() {
+        let toml = r#"
+            [attachments]
+            enabled = false
+        "#;
+        let config: StarpodConfig = toml::from_str(toml).unwrap();
+        assert!(!config.attachments.enabled);
+    }
+
+    #[test]
+    fn attachments_default_when_missing_from_toml() {
+        let toml = "";
+        let config: StarpodConfig = toml::from_str(toml).unwrap();
+        assert!(config.attachments.enabled);
+        assert!(config.attachments.allowed_extensions.is_empty());
+        assert_eq!(config.attachments.max_file_size, 20 * 1024 * 1024);
     }
 }

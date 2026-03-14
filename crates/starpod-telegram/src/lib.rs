@@ -8,7 +8,7 @@ use tracing::{debug, error, info, warn};
 
 use agent_sdk::{ContentBlock, Message};
 use starpod_agent::StarpodAgent;
-use starpod_core::{Attachment, ChatMessage, StarpodConfig, MAX_ATTACHMENT_SIZE};
+use starpod_core::{Attachment, ChatMessage, StarpodConfig};
 
 /// Maximum Telegram message length.
 const MAX_MSG_LEN: usize = 4096;
@@ -150,6 +150,7 @@ async fn handle_message(
         .to_string();
 
     // Extract attachments from photos and documents
+    let att_config = &agent.config().attachments;
     let mut attachments: Vec<Attachment> = Vec::new();
 
     // Handle photos (Telegram sends multiple sizes; pick the largest)
@@ -157,15 +158,17 @@ async fn handle_message(
         if let Some(largest) = photos.last() {
             match download_telegram_file(&bot, &largest.file.id).await {
                 Ok(bytes) => {
-                    if bytes.len() <= MAX_ATTACHMENT_SIZE {
-                        use base64::Engine;
-                        attachments.push(Attachment {
-                            file_name: "photo.jpg".to_string(),
-                            mime_type: "image/jpeg".to_string(),
-                            data: base64::engine::general_purpose::STANDARD.encode(&bytes),
-                        });
-                    } else {
-                        warn!("Photo exceeds 20 MB, skipping");
+                    let file_name = "photo.jpg";
+                    match att_config.validate(file_name, bytes.len()) {
+                        Ok(()) => {
+                            use base64::Engine;
+                            attachments.push(Attachment {
+                                file_name: file_name.to_string(),
+                                mime_type: "image/jpeg".to_string(),
+                                data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+                            });
+                        }
+                        Err(reason) => warn!("{}", reason),
                     }
                 }
                 Err(e) => warn!(error = %e, "Failed to download Telegram photo"),
@@ -177,24 +180,25 @@ async fn handle_message(
     if let Some(doc) = msg.document() {
         match download_telegram_file(&bot, &doc.file.id).await {
             Ok(bytes) => {
-                if bytes.len() <= MAX_ATTACHMENT_SIZE {
-                    let file_name = doc
-                        .file_name
-                        .clone()
-                        .unwrap_or_else(|| "document".to_string());
-                    let mime_type = doc
-                        .mime_type
-                        .as_ref()
-                        .map(|m| m.to_string())
-                        .unwrap_or_else(|| mime_from_filename(&file_name));
-                    use base64::Engine;
-                    attachments.push(Attachment {
-                        file_name,
-                        mime_type,
-                        data: base64::engine::general_purpose::STANDARD.encode(&bytes),
-                    });
-                } else {
-                    warn!("Document exceeds 20 MB, skipping");
+                let file_name = doc
+                    .file_name
+                    .clone()
+                    .unwrap_or_else(|| "document".to_string());
+                match att_config.validate(&file_name, bytes.len()) {
+                    Ok(()) => {
+                        let mime_type = doc
+                            .mime_type
+                            .as_ref()
+                            .map(|m| m.to_string())
+                            .unwrap_or_else(|| mime_from_filename(&file_name));
+                        use base64::Engine;
+                        attachments.push(Attachment {
+                            file_name,
+                            mime_type,
+                            data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+                        });
+                    }
+                    Err(reason) => warn!("{}", reason),
                 }
             }
             Err(e) => warn!(error = %e, "Failed to download Telegram document"),

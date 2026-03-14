@@ -44,7 +44,7 @@ Send a JSON message to start a conversation:
 | `user_id` | string | No | User identifier |
 | `channel_id` | string | No | Channel (`"main"` default) |
 | `channel_session_key` | string | No | Session key (UUID recommended) |
-| `attachments` | array | No | File attachments (base64-encoded, max 20 MB each) |
+| `attachments` | array | No | File attachments (base64-encoded, see [attachment settings](/getting-started/configuration#attachments)) |
 
 Each attachment object has:
 
@@ -54,7 +54,9 @@ Each attachment object has:
 | `mime_type` | string | MIME type (e.g. `"image/png"`, `"application/pdf"`) |
 | `data` | string | Base64-encoded file content |
 
-Images (`image/png`, `image/jpeg`, `image/gif`, `image/webp`) are sent to Claude for vision analysis. All files are saved to `{data_dir}/downloads/{session_id}/`.
+Images (`image/png`, `image/jpeg`, `image/gif`, `image/webp`) are sent to Claude for vision analysis. All files are saved to `{project_root}/downloads/`.
+
+Attachments are validated against the `[attachments]` settings in `config.toml` — you can disable uploads, restrict file extensions, and set a max file size. See [Attachment Settings](/getting-started/configuration#attachments).
 
 ### Server → Client
 

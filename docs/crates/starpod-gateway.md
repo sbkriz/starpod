@@ -42,6 +42,7 @@ Optional API key auth via `STARPOD_API_KEY` environment variable:
 pub struct AppState {
     pub agent: Arc<StarpodAgent>,
     pub api_key: Option<String>,
+    pub config: StarpodConfig,
 }
 ```
 

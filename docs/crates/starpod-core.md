@@ -50,6 +50,21 @@ config.resolved_provider_base_url("openai")   // config || default endpoint
 
 Provider API key env vars: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`. Ollama requires no key.
 
+## AttachmentsConfig
+
+Controls file upload handling (validated in gateway and Telegram):
+
+```rust
+pub struct AttachmentsConfig {
+    pub enabled: bool,                    // default: true
+    pub allowed_extensions: Vec<String>,  // default: [] (all allowed)
+    pub max_file_size: usize,             // default: 20 MB
+}
+
+// Validate an attachment against the config
+config.attachments.validate("photo.jpg", raw_size)?;
+```
+
 ## ChatMessage
 
 The input type for `StarpodAgent::chat()`:

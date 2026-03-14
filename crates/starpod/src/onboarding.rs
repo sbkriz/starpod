@@ -236,7 +236,21 @@ pub fn generate_config(result: &OnboardingResult) -> String {
         Some(uid) => config.push_str(&format!("allowed_users = [{}]\n", uid)),
         None => config.push_str("# allowed_users = [123456789]     # User IDs allowed to chat (empty = no one)\n"),
     }
-    config.push_str("# stream_mode = \"final_only\"      # \"final_only\" or \"all_messages\"\n");
+    config.push_str("# stream_mode = \"final_only\"      # \"final_only\" or \"all_messages\"\n\n");
+
+    // Attachments
+    config.push_str(
+        "# ══════════════════════════════════════════════════════════════════════════════\n",
+    );
+    config.push_str("# ATTACHMENTS\n");
+    config.push_str(
+        "# ══════════════════════════════════════════════════════════════════════════════\n\n",
+    );
+    config.push_str("[attachments]\n");
+    config.push_str("# enabled = true                   # Set to false to disable attachments entirely\n");
+    config.push_str("# allowed_extensions = []          # Allowed file extensions, e.g. [\"jpg\", \"png\", \"pdf\"]\n");
+    config.push_str("#                                  # Empty list = all extensions allowed\n");
+    config.push_str("# max_file_size = 20971520         # Max file size in bytes (default: 20 MB)\n");
 
     config
 }
