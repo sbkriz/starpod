@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orion</title>
+</head>
+<body>
+
+<div class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <h3>Conversations</h3>
+    <button class="sidebar-close" id="sidebar-close">&times;</button>
+  </div>
+  <button class="new-chat-btn" id="new-chat-btn">+ New Chat</button>
+  <div class="session-list" id="session-list">
+    <div class="session-empty">Loading...</div>
+  </div>
+</div>
+
+<div id="app">
+  <header>
+    <button class="menu-btn" id="menu-btn" aria-label="Conversations">
+      <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <span class="logo">Orion</span>
+    <div class="status">
+      <span class="dot connecting" id="status-dot"></span>
+      <span id="status-text">Connecting</span>
+    </div>
+  </header>
+  <div id="messages">
+    <div class="welcome">
+      <h2>Orion</h2>
+      <p>Your personal AI assistant. Ask anything.</p>
+    </div>
+  </div>
+  <div id="input-area">
+    <form id="input-form">
+      <textarea id="input-text" placeholder="Ask Orion anything..." rows="1" autofocus></textarea>
+      <button type="submit" id="send-btn" aria-label="Send">
+        <svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+      </button>
+    </form>
+  </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
