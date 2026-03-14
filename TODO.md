@@ -41,7 +41,7 @@
 - [ ] **MCP (Model Context Protocol) support** — Allow connecting external MCP servers as tool providers
 
 ### Infrastructure
-- [ ] **Hooks crate** — Extract hook logic from agent-sdk into a standalone `starpod-hooks` crate so Starpod can define its own lifecycle hooks independently of the SDK
+- [x] **Hooks crate** — Extract hook logic from agent-sdk into a standalone `starpod-hooks` crate so Starpod can define its own lifecycle hooks independently of the SDK
 - [ ] **Sandboxed execution** — Docker / Apple Container sandboxing for command execution
 - [ ] **Metrics & tracing** — Prometheus metrics, OpenTelemetry tracing for observability
 - [ ] **Rate limiting & auth** — Per-IP throttling, proper login/session auth beyond optional API key

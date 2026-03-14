@@ -44,7 +44,7 @@ pub mod types;
 
 // Re-export main public API
 pub use error::AgentError;
-pub use hooks::{hook_fn, HookCallback, HookCallbackMatcher, HookEvent, HookInput, HookOutput};
+pub use hooks::{hook_fn, HookCallback, HookCallbackMatcher, HookEvent, HookInput, HookOutput, HookRegistry};
 pub use mcp::{McpServerConfig, McpStdioServerConfig, McpHttpServerConfig, McpSseServerConfig};
 pub use options::{CustomToolDefinition, ExternalToolHandlerFn, Options, OptionsBuilder, PermissionMode, QueryAttachment};
 pub use provider::{CostRates, LlmProvider, ProviderCapabilities};

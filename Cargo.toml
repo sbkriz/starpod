@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/agent-sdk",
+    "crates/starpod-hooks",
     "crates/starpod-core",
     "crates/starpod-memory",
     "crates/starpod-vault",

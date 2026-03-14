@@ -1,0 +1,28 @@
+[package]
+name = "starpod-hooks"
+version = "0.1.0"
+edition = "2021"
+description = "Lifecycle hook system for Starpod — event types, callbacks, matching, and execution"
+license = "MIT"
+
+[dependencies]
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Regex for hook matchers
+regex = "1"
+
+# Async runtime (for CancellationToken + timeout)
+tokio = { version = "1", features = ["time"] }
+tokio-util = "0.7"
+
+# Error handling
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+pretty_assertions = "1"

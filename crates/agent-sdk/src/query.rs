@@ -23,8 +23,7 @@ use crate::client::{
 };
 use crate::compact;
 use crate::error::{AgentError, Result};
-use crate::hooks::{HookCallbackMatcher, HookEvent, HookInput};
-use crate::hooks::input::BaseHookInput;
+use crate::hooks::HookRegistry;
 use crate::options::{Options, PermissionMode, ThinkingConfig};
 use crate::permissions::{PermissionEvaluator, PermissionVerdict};
 use crate::provider::LlmProvider;
@@ -288,6 +287,9 @@ async fn run_agent_loop(
 
     // Initialize tool executor
     let tool_executor = ToolExecutor::new(PathBuf::from(&cwd));
+
+    // Build hook registry from options
+    let hook_registry = HookRegistry::from_map(std::mem::take(&mut options.hooks));
 
     // Take followup_rx out of options before borrowing options immutably
     let mut followup_rx = options.followup_rx.take();
@@ -691,18 +693,14 @@ async fn run_agent_loop(
                     };
 
                     // Run PostToolUse hooks
-                    if let Some(matchers) = options.hooks.get(&HookEvent::PostToolUse) {
-                        run_post_tool_use_hooks(
-                            matchers,
-                            tool_name,
-                            &actual_input,
-                            &serde_json::to_value(&tool_result.content).unwrap_or_default(),
-                            tool_use_id,
-                            &session_id,
-                            &cwd,
-                        )
-                        .await;
-                    }
+                    hook_registry.run_post_tool_use(
+                        tool_name,
+                        &actual_input,
+                        &serde_json::to_value(&tool_result.content).unwrap_or_default(),
+                        tool_use_id,
+                        &session_id,
+                        &cwd,
+                    ).await;
 
                     tool_results.push(ApiContentBlock::ToolResult {
                         tool_use_id: tool_use_id.clone(),
@@ -844,46 +842,6 @@ async fn run_agent_loop(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-/// Run PostToolUse hooks (fire-and-forget for async hooks).
-async fn run_post_tool_use_hooks(
-    matchers: &[HookCallbackMatcher],
-    tool_name: &str,
-    tool_input: &serde_json::Value,
-    tool_response: &serde_json::Value,
-    tool_use_id: &str,
-    session_id: &str,
-    cwd: &str,
-) {
-    for matcher in matchers {
-        if !matcher.matches(tool_name).unwrap_or(false) {
-            continue;
-        }
-
-        let input = HookInput::PostToolUse {
-            base: BaseHookInput {
-                session_id: session_id.to_string(),
-                transcript_path: String::new(),
-                cwd: cwd.to_string(),
-                permission_mode: None,
-                agent_id: None,
-                agent_type: None,
-            },
-            tool_name: tool_name.to_string(),
-            tool_input: tool_input.clone(),
-            tool_response: tool_response.clone(),
-            tool_use_id: tool_use_id.to_string(),
-        };
-
-        let cancel = tokio_util::sync::CancellationToken::new();
-        for hook in &matcher.hooks {
-            if let Err(e) = hook(input.clone(), Some(tool_use_id.to_string()), cancel.clone()).await
-            {
-                warn!("PostToolUse hook error: {}", e);
             }
         }
     }

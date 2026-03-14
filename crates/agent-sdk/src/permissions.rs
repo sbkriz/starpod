@@ -12,10 +12,7 @@ use tracing::{debug, warn};
 
 use crate::error::Result;
 use crate::hooks::{HookCallbackMatcher, HookEvent, HookInput, HookOutput};
-use crate::hooks::input::BaseHookInput;
-use crate::hooks::output::{
-    HookSpecificOutput, PermissionDecision,
-};
+use starpod_hooks::{BaseHookInput, HookSpecificOutput, PermissionDecision};
 use crate::options::{Options, PermissionMode};
 
 /// Result of permission evaluation.

@@ -54,6 +54,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "starpod-hooks",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -3096,6 +3097,20 @@ dependencies = [
  "starpod-session",
  "tokio",
  "tower-http",
+ "tracing",
+]
+
+[[package]]
+name = "starpod-hooks"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
  "tracing",
 ]
 
