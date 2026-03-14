@@ -592,16 +592,11 @@ async fn main() -> anyhow::Result<()> {
                         if !telegram_allowed.is_empty() {
                             let token = token.clone();
                             let users = telegram_allowed.clone();
-                            Some(Arc::new(move |job_name, result_text, success| {
+                            Some(Arc::new(move |_job_name, result_text, _success| {
                                 let token = token.clone();
                                 let users = users.clone();
                                 Box::pin(async move {
-                                    let status = if success { "completed" } else { "failed" };
-                                    let msg = format!(
-                                        "[Cron] Job \"{}\" {}:\n\n{}",
-                                        job_name, status, result_text
-                                    );
-                                    orion_telegram::send_notification(&token, &users, &msg).await;
+                                    orion_telegram::send_notification(&token, &users, &result_text).await;
                                 })
                             }))
                         } else {
