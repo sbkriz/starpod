@@ -1,0 +1,206 @@
+/* ─── Orion Docs – Custom Theme ─────────────────────── */
+
+:root {
+  /* Indigo/violet palette inspired by Mintlify */
+  --vp-c-brand-1: #6366f1;
+  --vp-c-brand-2: #818cf8;
+  --vp-c-brand-3: #4f46e5;
+  --vp-c-brand-soft: rgba(99, 102, 241, 0.14);
+
+  /* Tip/warning/danger */
+  --vp-c-tip-1: #6366f1;
+  --vp-c-tip-soft: rgba(99, 102, 241, 0.14);
+
+  /* Home hero gradient */
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: -webkit-linear-gradient(
+    120deg,
+    #6366f1 30%,
+    #a78bfa
+  );
+  --vp-home-hero-image-background-image: linear-gradient(
+    -45deg,
+    #6366f1 50%,
+    #a78bfa 50%
+  );
+  --vp-home-hero-image-filter: blur(44px);
+}
+
+.dark {
+  --vp-c-brand-1: #818cf8;
+  --vp-c-brand-2: #6366f1;
+  --vp-c-brand-3: #a78bfa;
+  --vp-c-brand-soft: rgba(129, 140, 248, 0.14);
+
+  --vp-c-tip-1: #818cf8;
+  --vp-c-tip-soft: rgba(129, 140, 248, 0.14);
+}
+
+/* ─── Hero section polish ───────────────────────────── */
+
+.VPHero .name {
+  font-size: 3.5rem !important;
+  letter-spacing: -0.02em;
+}
+
+.VPHero .text {
+  font-size: 1.4rem !important;
+  max-width: 560px;
+  color: var(--vp-c-text-2);
+}
+
+.VPHero .tagline {
+  font-size: 1.1rem !important;
+  max-width: 520px;
+  line-height: 1.6;
+}
+
+/* ─── Feature cards (home page) ─────────────────────── */
+
+.VPFeature {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  transition: all 0.25s ease;
+  background: var(--vp-c-bg-soft);
+}
+
+.VPFeature:hover {
+  border-color: var(--vp-c-brand-1);
+  box-shadow: 0 4px 24px rgba(99, 102, 241, 0.08);
+  transform: translateY(-2px);
+}
+
+.dark .VPFeature:hover {
+  box-shadow: 0 4px 24px rgba(129, 140, 248, 0.12);
+}
+
+/* ─── Sidebar polish ────────────────────────────────── */
+
+.VPSidebar .group + .group {
+  border-top: 1px solid var(--vp-c-divider);
+  padding-top: 10px;
+}
+
+.VPSidebarItem .text {
+  font-size: 0.9rem;
+}
+
+.VPSidebarItem.is-active > .item > .link > .text {
+  color: var(--vp-c-brand-1);
+  font-weight: 600;
+}
+
+/* ─── Content styling ───────────────────────────────── */
+
+.vp-doc h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.vp-doc h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-top: 2.5rem;
+  border-top: 1px solid var(--vp-c-divider);
+  padding-top: 1.5rem;
+}
+
+.vp-doc h3 {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+/* Code blocks */
+.vp-doc div[class*='language-'] {
+  border-radius: 10px;
+  border: 1px solid var(--vp-c-divider);
+}
+
+.vp-doc div[class*='language-']:hover {
+  border-color: var(--vp-c-brand-soft);
+}
+
+/* Tables */
+.vp-doc table {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--vp-c-divider);
+}
+
+.vp-doc tr:nth-child(2n) {
+  background-color: var(--vp-c-bg-soft);
+}
+
+.vp-doc th {
+  background-color: var(--vp-c-bg-soft);
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Inline code */
+.vp-doc :not(pre) > code {
+  border-radius: 4px;
+  padding: 2px 6px;
+  background-color: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+  font-size: 0.9em;
+}
+
+/* ─── Custom containers (tip/warning/etc) ───────────── */
+
+.vp-doc .custom-block {
+  border-radius: 10px;
+  border-left: 4px solid;
+  padding: 16px 20px;
+}
+
+.vp-doc .custom-block.tip {
+  border-left-color: var(--vp-c-brand-1);
+  background-color: var(--vp-c-brand-soft);
+}
+
+/* ─── Badges ────────────────────────────────────────── */
+
+.VPBadge {
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+/* ─── Nav bar ───────────────────────────────────────── */
+
+.VPNavBar {
+  backdrop-filter: blur(12px);
+}
+
+/* ─── Scrollbar (dark mode) ─────────────────────────── */
+
+.dark ::-webkit-scrollbar {
+  width: 6px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--vp-c-divider);
+  border-radius: 3px;
+}
+
+/* ─── Responsive tweaks ─────────────────────────────── */
+
+@media (max-width: 768px) {
+  .VPHero .name {
+    font-size: 2.2rem !important;
+  }
+  .VPHero .text {
+    font-size: 1.1rem !important;
+  }
+}
