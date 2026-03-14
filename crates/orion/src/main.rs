@@ -32,38 +32,6 @@ enum Commands {
         #[command(subcommand)]
         action: InstanceCommand,
     },
-
-    // ── Utility subcommands (will move under `agent` later) ──
-
-    /// Memory management commands.
-    Memory {
-        #[command(subcommand)]
-        action: MemoryAction,
-    },
-
-    /// Vault credential management.
-    Vault {
-        #[command(subcommand)]
-        action: VaultAction,
-    },
-
-    /// Session management.
-    Sessions {
-        #[command(subcommand)]
-        action: SessionAction,
-    },
-
-    /// Skill management.
-    Skills {
-        #[command(subcommand)]
-        action: SkillAction,
-    },
-
-    /// Cron job management.
-    Cron {
-        #[command(subcommand)]
-        action: CronAction,
-    },
 }
 
 // ── Agent subcommands ──────────────────────────────────────────────────────
@@ -108,6 +76,38 @@ enum AgentCommand {
 
     /// Start an interactive REPL session.
     Repl,
+
+    // ── Utility subcommands ──
+
+    /// Memory management commands.
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
+
+    /// Vault credential management.
+    Vault {
+        #[command(subcommand)]
+        action: VaultAction,
+    },
+
+    /// Session management.
+    Sessions {
+        #[command(subcommand)]
+        action: SessionAction,
+    },
+
+    /// Skill management.
+    Skills {
+        #[command(subcommand)]
+        action: SkillAction,
+    },
+
+    /// Cron job management.
+    Cron {
+        #[command(subcommand)]
+        action: CronAction,
+    },
 }
 
 // ── Instance subcommands (stubs for future backend) ────────────────────────
@@ -709,6 +709,188 @@ async fn main() -> anyhow::Result<()> {
                 let name = config.identity.display_name().to_string();
                 run_repl(config, &name).await?;
             }
+
+            // ── Utility commands ──────────────────────────────────────
+            AgentCommand::Memory { action } => {
+                let config = OrionConfig::load().await?;
+                let agent = OrionAgent::new(config).await?;
+                match action {
+                    MemoryAction::Search { query, limit } => {
+                        let results = agent.memory().search(&query, limit).await?;
+                        if results.is_empty() {
+                            println!("No results found.");
+                        } else {
+                            for (i, r) in results.iter().enumerate() {
+                                println!(
+                                    "--- [{}/{}] {} (lines {}-{}) ---",
+                                    i + 1,
+                                    results.len(),
+                                    r.source,
+                                    r.line_start,
+                                    r.line_end
+                                );
+                                println!("{}\n", r.text);
+                            }
+                        }
+                    }
+                    MemoryAction::Reindex => {
+                        agent.memory().reindex().await?;
+                        println!("Memory index rebuilt.");
+                    }
+                }
+            }
+
+            AgentCommand::Vault { action } => {
+                let config = OrionConfig::load().await?;
+                let agent = OrionAgent::new(config).await?;
+                match action {
+                    VaultAction::Get { key } => match agent.vault().get(&key).await? {
+                        Some(value) => println!("{}", value),
+                        None => println!("No value found for key: {}", key),
+                    },
+                    VaultAction::Set { key, value } => {
+                        agent.vault().set(&key, &value).await?;
+                        println!("Stored '{}'.", key);
+                    }
+                    VaultAction::Delete { key } => {
+                        agent.vault().delete(&key).await?;
+                        println!("Deleted '{}'.", key);
+                    }
+                    VaultAction::List => {
+                        let keys = agent.vault().list_keys().await?;
+                        if keys.is_empty() {
+                            println!("Vault is empty.");
+                        } else {
+                            for key in &keys {
+                                println!("  {}", key);
+                            }
+                        }
+                    }
+                }
+            }
+
+            AgentCommand::Sessions { action } => {
+                let config = OrionConfig::load().await?;
+                let agent = OrionAgent::new(config).await?;
+                match action {
+                    SessionAction::List { limit } => {
+                        let sessions = agent.session_mgr().list_sessions(limit).await?;
+                        if sessions.is_empty() {
+                            println!("No sessions found.");
+                        } else {
+                            for s in &sessions {
+                                let status = if s.is_closed { "closed" } else { "open" };
+                                let summary = s
+                                    .summary
+                                    .as_deref()
+                                    .unwrap_or("(no summary)");
+                                println!(
+                                    "  {} [{}] msgs={} {}",
+                                    &s.id[..8],
+                                    status,
+                                    s.message_count,
+                                    summary
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            AgentCommand::Skills { action } => {
+                let config = OrionConfig::load().await?;
+                let agent = OrionAgent::new(config).await?;
+                match action {
+                    SkillAction::List => {
+                        let skills = agent.skills().list()?;
+                        if skills.is_empty() {
+                            println!("No skills found.");
+                        } else {
+                            for s in &skills {
+                                let preview = if s.content.len() > 60 {
+                                    format!("{}...", &s.content[..60])
+                                } else {
+                                    s.content.clone()
+                                };
+                                println!("  {} — {}", s.name, preview.replace('\n', " "));
+                            }
+                        }
+                    }
+                    SkillAction::Show { name } => {
+                        match agent.skills().get(&name)? {
+                            Some(skill) => println!("{}", skill.content),
+                            None => println!("Skill '{}' not found.", name),
+                        }
+                    }
+                    SkillAction::Create { name, content, file } => {
+                        let content = if let Some(path) = file {
+                            std::fs::read_to_string(&path)?
+                        } else if let Some(c) = content {
+                            c
+                        } else {
+                            anyhow::bail!("Provide --content or --file");
+                        };
+                        agent.skills().create(&name, &content)?;
+                        println!("Created skill '{}'.", name);
+                    }
+                    SkillAction::Delete { name } => {
+                        agent.skills().delete(&name)?;
+                        println!("Deleted skill '{}'.", name);
+                    }
+                }
+            }
+
+            AgentCommand::Cron { action } => {
+                let config = OrionConfig::load().await?;
+                let agent = OrionAgent::new(config).await?;
+                match action {
+                    CronAction::List => {
+                        let jobs = agent.cron().list_jobs().await?;
+                        if jobs.is_empty() {
+                            println!("No cron jobs.");
+                        } else {
+                            for j in &jobs {
+                                let status = if j.enabled { "enabled" } else { "disabled" };
+                                let next = j.next_run_at
+                                    .map(orion_cron::store::epoch_to_rfc3339)
+                                    .unwrap_or_else(|| "none".to_string());
+                                println!(
+                                    "  {} [{}] next={} — {}",
+                                    j.name, status, next,
+                                    truncate(&j.prompt, 60)
+                                );
+                            }
+                        }
+                    }
+                    CronAction::Remove { name } => {
+                        agent.cron().remove_job_by_name(&name).await?;
+                        println!("Removed job '{}'.", name);
+                    }
+                    CronAction::Runs { name, limit } => {
+                        let jobs = agent.cron().list_jobs().await?;
+                        let job = jobs.iter().find(|j| j.name == name);
+                        match job {
+                            Some(j) => {
+                                let runs = agent.cron().list_runs(&j.id, limit).await?;
+                                if runs.is_empty() {
+                                    println!("No runs for '{}'.", name);
+                                } else {
+                                    for r in &runs {
+                                        let summary = r.result_summary.as_deref().unwrap_or("");
+                                        let started = orion_cron::store::epoch_to_rfc3339(r.started_at);
+                                        println!(
+                                            "  {} {:?} {}",
+                                            started, r.status,
+                                            truncate(summary, 60)
+                                        );
+                                    }
+                                }
+                            }
+                            None => println!("Job '{}' not found.", name),
+                        }
+                    }
+                }
+            }
         },
 
         // ── Instance commands (stubs) ──────────────────────────────────
@@ -733,187 +915,6 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        // ── Utility commands ───────────────────────────────────────────
-        Commands::Memory { action } => {
-            let config = OrionConfig::load().await?;
-            let agent = OrionAgent::new(config).await?;
-            match action {
-                MemoryAction::Search { query, limit } => {
-                    let results = agent.memory().search(&query, limit).await?;
-                    if results.is_empty() {
-                        println!("No results found.");
-                    } else {
-                        for (i, r) in results.iter().enumerate() {
-                            println!(
-                                "--- [{}/{}] {} (lines {}-{}) ---",
-                                i + 1,
-                                results.len(),
-                                r.source,
-                                r.line_start,
-                                r.line_end
-                            );
-                            println!("{}\n", r.text);
-                        }
-                    }
-                }
-                MemoryAction::Reindex => {
-                    agent.memory().reindex().await?;
-                    println!("Memory index rebuilt.");
-                }
-            }
-        }
-
-        Commands::Vault { action } => {
-            let config = OrionConfig::load().await?;
-            let agent = OrionAgent::new(config).await?;
-            match action {
-                VaultAction::Get { key } => match agent.vault().get(&key).await? {
-                    Some(value) => println!("{}", value),
-                    None => println!("No value found for key: {}", key),
-                },
-                VaultAction::Set { key, value } => {
-                    agent.vault().set(&key, &value).await?;
-                    println!("Stored '{}'.", key);
-                }
-                VaultAction::Delete { key } => {
-                    agent.vault().delete(&key).await?;
-                    println!("Deleted '{}'.", key);
-                }
-                VaultAction::List => {
-                    let keys = agent.vault().list_keys().await?;
-                    if keys.is_empty() {
-                        println!("Vault is empty.");
-                    } else {
-                        for key in &keys {
-                            println!("  {}", key);
-                        }
-                    }
-                }
-            }
-        }
-
-        Commands::Sessions { action } => {
-            let config = OrionConfig::load().await?;
-            let agent = OrionAgent::new(config).await?;
-            match action {
-                SessionAction::List { limit } => {
-                    let sessions = agent.session_mgr().list_sessions(limit).await?;
-                    if sessions.is_empty() {
-                        println!("No sessions found.");
-                    } else {
-                        for s in &sessions {
-                            let status = if s.is_closed { "closed" } else { "open" };
-                            let summary = s
-                                .summary
-                                .as_deref()
-                                .unwrap_or("(no summary)");
-                            println!(
-                                "  {} [{}] msgs={} {}",
-                                &s.id[..8],
-                                status,
-                                s.message_count,
-                                summary
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        Commands::Skills { action } => {
-            let config = OrionConfig::load().await?;
-            let agent = OrionAgent::new(config).await?;
-            match action {
-                SkillAction::List => {
-                    let skills = agent.skills().list()?;
-                    if skills.is_empty() {
-                        println!("No skills found.");
-                    } else {
-                        for s in &skills {
-                            let preview = if s.content.len() > 60 {
-                                format!("{}...", &s.content[..60])
-                            } else {
-                                s.content.clone()
-                            };
-                            println!("  {} — {}", s.name, preview.replace('\n', " "));
-                        }
-                    }
-                }
-                SkillAction::Show { name } => {
-                    match agent.skills().get(&name)? {
-                        Some(skill) => println!("{}", skill.content),
-                        None => println!("Skill '{}' not found.", name),
-                    }
-                }
-                SkillAction::Create { name, content, file } => {
-                    let content = if let Some(path) = file {
-                        std::fs::read_to_string(&path)?
-                    } else if let Some(c) = content {
-                        c
-                    } else {
-                        anyhow::bail!("Provide --content or --file");
-                    };
-                    agent.skills().create(&name, &content)?;
-                    println!("Created skill '{}'.", name);
-                }
-                SkillAction::Delete { name } => {
-                    agent.skills().delete(&name)?;
-                    println!("Deleted skill '{}'.", name);
-                }
-            }
-        }
-
-        Commands::Cron { action } => {
-            let config = OrionConfig::load().await?;
-            let agent = OrionAgent::new(config).await?;
-            match action {
-                CronAction::List => {
-                    let jobs = agent.cron().list_jobs().await?;
-                    if jobs.is_empty() {
-                        println!("No cron jobs.");
-                    } else {
-                        for j in &jobs {
-                            let status = if j.enabled { "enabled" } else { "disabled" };
-                            let next = j.next_run_at
-                                .map(orion_cron::store::epoch_to_rfc3339)
-                                .unwrap_or_else(|| "none".to_string());
-                            println!(
-                                "  {} [{}] next={} — {}",
-                                j.name, status, next,
-                                truncate(&j.prompt, 60)
-                            );
-                        }
-                    }
-                }
-                CronAction::Remove { name } => {
-                    agent.cron().remove_job_by_name(&name).await?;
-                    println!("Removed job '{}'.", name);
-                }
-                CronAction::Runs { name, limit } => {
-                    let jobs = agent.cron().list_jobs().await?;
-                    let job = jobs.iter().find(|j| j.name == name);
-                    match job {
-                        Some(j) => {
-                            let runs = agent.cron().list_runs(&j.id, limit).await?;
-                            if runs.is_empty() {
-                                println!("No runs for '{}'.", name);
-                            } else {
-                                for r in &runs {
-                                    let summary = r.result_summary.as_deref().unwrap_or("");
-                                    let started = orion_cron::store::epoch_to_rfc3339(r.started_at);
-                                    println!(
-                                        "  {} {:?} {}",
-                                        started, r.status,
-                                        truncate(summary, 60)
-                                    );
-                                }
-                            }
-                        }
-                        None => println!("Job '{}' not found.", name),
-                    }
-                }
-            }
-        }
     }
 
     Ok(())

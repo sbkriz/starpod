@@ -20,7 +20,7 @@
 ## Planned
 
 ### CLI & Config
-- [ ] **Nest utility commands under `agent`** — Move memory, vault, sessions, skills, cron subcommands under `orion agent` (e.g. `orion agent memory search`)
+- [x] **Nest utility commands under `agent`** — Move memory, vault, sessions, skills, cron subcommands under `orion agent` (e.g. `orion agent memory search`)
 - [ ] **`orion agent apply`** — Sync local `.orion/` config (model, tools, skills, system prompt, etc.) to backend so new instances inherit settings
 - [ ] **`orion agent status`** — Show current project config, agent health, DB sizes, active sessions
 - [ ] **`.orion/system_prompt.md`** — Allow custom system prompt per project (loaded from file, merged with defaults)
