@@ -51,70 +51,70 @@ orion agent repl
 
 ## Memory
 
-### `orion memory search`
+### `orion agent memory search`
 
 Full-text search across memory and knowledge files.
 
 ```bash
-orion memory search "database migrations"
-orion memory search "rust patterns" --limit 10
+orion agent memory search "database migrations"
+orion agent memory search "rust patterns" --limit 10
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--limit`, `-l` | `5` | Maximum results |
 
-### `orion memory reindex`
+### `orion agent memory reindex`
 
 Rebuild the FTS5 search index.
 
 ```bash
-orion memory reindex
+orion agent memory reindex
 ```
 
 ## Vault
 
-### `orion vault set`
+### `orion agent vault set`
 
 Encrypt and store a credential.
 
 ```bash
-orion vault set github_token "ghp_xxxxxxxxxxxx"
+orion agent vault set github_token "ghp_xxxxxxxxxxxx"
 ```
 
-### `orion vault get`
+### `orion agent vault get`
 
 Retrieve a decrypted credential.
 
 ```bash
-orion vault get github_token
+orion agent vault get github_token
 ```
 
-### `orion vault delete`
+### `orion agent vault delete`
 
 Delete a stored credential.
 
 ```bash
-orion vault delete github_token
+orion agent vault delete github_token
 ```
 
-### `orion vault list`
+### `orion agent vault list`
 
 List all stored keys (values are not shown).
 
 ```bash
-orion vault list
+orion agent vault list
 ```
 
 ## Sessions
 
-### `orion sessions list`
+### `orion agent sessions list`
 
 List recent sessions.
 
 ```bash
-orion sessions list
-orion sessions list --limit 20
+orion agent sessions list
+orion agent sessions list --limit 20
 ```
 
 | Flag | Default | Description |
@@ -123,29 +123,29 @@ orion sessions list --limit 20
 
 ## Skills
 
-### `orion skills list`
+### `orion agent skills list`
 
 List all skills.
 
 ```bash
-orion skills list
+orion agent skills list
 ```
 
-### `orion skills show`
+### `orion agent skills show`
 
 Show a skill's content.
 
 ```bash
-orion skills show code-review
+orion agent skills show code-review
 ```
 
-### `orion skills create`
+### `orion agent skills create`
 
 Create a new skill.
 
 ```bash
-orion skills create "code-review" --content "Always check for error handling"
-orion skills create "code-review" --file code-review.md
+orion agent skills create "code-review" --content "Always check for error handling"
+orion agent skills create "code-review" --file code-review.md
 ```
 
 | Flag | Description |
@@ -153,39 +153,39 @@ orion skills create "code-review" --file code-review.md
 | `--content`, `-c` | Inline skill content |
 | `--file`, `-f` | Read content from a file |
 
-### `orion skills delete`
+### `orion agent skills delete`
 
 Delete a skill.
 
 ```bash
-orion skills delete code-review
+orion agent skills delete code-review
 ```
 
 ## Cron
 
-### `orion cron list`
+### `orion agent cron list`
 
 List all scheduled jobs.
 
 ```bash
-orion cron list
+orion agent cron list
 ```
 
-### `orion cron remove`
+### `orion agent cron remove`
 
 Remove a job by name.
 
 ```bash
-orion cron remove "morning-reminder"
+orion agent cron remove "morning-reminder"
 ```
 
-### `orion cron runs`
+### `orion agent cron runs`
 
 Show recent executions for a job.
 
 ```bash
-orion cron runs "morning-reminder"
-orion cron runs "morning-reminder" --limit 20
+orion agent cron runs "morning-reminder"
+orion agent cron runs "morning-reminder" --limit 20
 ```
 
 | Flag | Default | Description |

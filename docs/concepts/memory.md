@@ -95,15 +95,15 @@ Append to today's daily log:
 
 ```bash
 # Search from the command line
-orion memory search "database migrations" --limit 5
+orion agent memory search "database migrations" --limit 5
 
 # Rebuild FTS5 index after manual edits
-orion memory reindex
+orion agent memory reindex
 ```
 
 ## Manual Editing
 
-You can edit any file in `.orion/data/` with your text editor. Run `orion memory reindex` afterward to update the search index.
+You can edit any file in `.orion/data/` with your text editor. Run `orion agent memory reindex` afterward to update the search index.
 
 ::: tip
 Edit `SOUL.md` to change the agent's personality. Edit `USER.md` to update what the agent knows about you. Changes take effect on the next conversation.

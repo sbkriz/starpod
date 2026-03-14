@@ -14,14 +14,14 @@ Skills are **markdown instruction files** injected into the agent's system promp
 
 ```bash
 # Inline content
-orion skills create "code-review" --content "When reviewing code, always check for:
+orion agent skills create "code-review" --content "When reviewing code, always check for:
 - Error handling
 - Edge cases
 - Performance implications
 - Security vulnerabilities"
 
 # From a file
-orion skills create "code-review" --file code-review-instructions.md
+orion agent skills create "code-review" --file code-review-instructions.md
 ```
 
 ### Via the Agent
@@ -35,9 +35,9 @@ The agent uses `SkillCreate` to save it. Takes effect immediately on subsequent 
 ## Managing Skills
 
 ```bash
-orion skills list              # List all skills
-orion skills show code-review  # View a skill
-orion skills delete code-review # Delete a skill
+orion agent skills list              # List all skills
+orion agent skills show code-review  # View a skill
+orion agent skills delete code-review # Delete a skill
 ```
 
 ## Agent Tools

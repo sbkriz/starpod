@@ -95,5 +95,5 @@ All messages (user, assistant, tool use/results) are saved to the session databa
 ## CLI
 
 ```bash
-orion sessions list --limit 10
+orion agent sessions list --limit 10
 ```

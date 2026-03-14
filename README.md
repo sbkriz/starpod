@@ -142,25 +142,25 @@ orion instance kill <id>                Kill an instance
 orion instance pause <id>               Pause an instance
 orion instance restart <id>             Restart an instance
 
-orion memory search "<query>" [-l 5]    Full-text search over memory
-orion memory reindex                    Rebuild the FTS5 index
+orion agent memory search "<query>" [-l 5]    Full-text search over memory
+orion agent memory reindex                    Rebuild the FTS5 index
 
-orion vault get <key>                   Retrieve a stored credential
-orion vault set <key> <value>           Encrypt and store a credential
-orion vault delete <key>                Delete a credential
-orion vault list                        List all stored keys
+orion agent vault get <key>                   Retrieve a stored credential
+orion agent vault set <key> <value>           Encrypt and store a credential
+orion agent vault delete <key>                Delete a credential
+orion agent vault list                        List all stored keys
 
-orion sessions list [-l 10]             List recent sessions
+orion agent sessions list [-l 10]             List recent sessions
 
-orion skills list                       List all skills
-orion skills show <name>                Show a skill's content
-orion skills create <name> -c "..."     Create a skill from inline content
-orion skills create <name> -f file.md   Create a skill from a file
-orion skills delete <name>              Delete a skill
+orion agent skills list                       List all skills
+orion agent skills show <name>                Show a skill's content
+orion agent skills create <name> -c "..."     Create a skill from inline content
+orion agent skills create <name> -f file.md   Create a skill from a file
+orion agent skills delete <name>              Delete a skill
 
-orion cron list                         List all cron jobs
-orion cron remove <name>                Remove a cron job
-orion cron runs <name> [-l 10]          Show recent runs for a job
+orion agent cron list                         List all cron jobs
+orion agent cron remove <name>                Remove a cron job
+orion agent cron runs <name> [-l 10]          Show recent runs for a job
 ```
 
 ## Web UI

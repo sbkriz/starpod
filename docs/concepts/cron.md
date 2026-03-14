@@ -77,9 +77,9 @@ Completed cron jobs can send results to Telegram. The notification includes the 
 ## CLI
 
 ```bash
-orion cron list                         # List all jobs
-orion cron remove "morning-reminder"    # Remove a job
-orion cron runs "morning-reminder" -l 10 # View run history
+orion agent cron list                         # List all jobs
+orion agent cron remove "morning-reminder"    # Remove a job
+orion agent cron runs "morning-reminder" -l 10 # View run history
 ```
 
 ## Timezone

@@ -32,16 +32,16 @@ Encrypts and stores the value. Overwrites if the key already exists.
 
 ```bash
 # Store a credential
-orion vault set github_token "ghp_xxxxxxxxxxxx"
+orion agent vault set github_token "ghp_xxxxxxxxxxxx"
 
 # Retrieve it
-orion vault get github_token
+orion agent vault get github_token
 
 # List all stored keys (values are not shown)
-orion vault list
+orion agent vault list
 
 # Delete a credential
-orion vault delete github_token
+orion agent vault delete github_token
 ```
 
 ## Use Cases
