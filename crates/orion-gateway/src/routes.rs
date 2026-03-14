@@ -16,6 +16,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/api/chat", post(chat_handler))
         .route("/api/sessions", get(list_sessions_handler))
         .route("/api/sessions/{id}", get(get_session_handler))
+        .route("/api/sessions/{id}/messages", get(get_session_messages_handler))
         .route("/api/memory/search", get(memory_search_handler))
         .route("/api/memory/reindex", post(reindex_handler))
         .route("/api/health", get(health_handler))
@@ -101,6 +102,25 @@ async fn get_session_handler(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
                 error: format!("Session get error: {}", e),
+            }),
+        )),
+    }
+}
+
+/// Get session messages — GET /api/sessions/:id/messages
+async fn get_session_messages_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<orion_session::SessionMessage>>, (StatusCode, Json<ErrorResponse>)> {
+    check_api_key(&state, &headers)?;
+
+    match state.agent.session_mgr().get_messages(&id).await {
+        Ok(messages) => Ok(Json(messages)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Get messages error: {}", e),
             }),
         )),
     }

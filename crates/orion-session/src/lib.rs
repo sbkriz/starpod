@@ -32,6 +32,16 @@ pub struct SessionMeta {
     pub message_count: i64,
 }
 
+/// A stored message in a session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMessage {
+    pub id: i64,
+    pub session_id: String,
+    pub role: String,
+    pub content: String,
+    pub timestamp: String,
+}
+
 /// Usage record for a single turn.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageRecord {
@@ -258,6 +268,48 @@ impl SessionManager {
             total_cost_usd: row.get::<f64, _>("cost"),
             total_turns: row.get::<i64, _>("turns") as u32,
         })
+    }
+
+    /// Save a message to a session.
+    pub async fn save_message(&self, session_id: &str, role: &str, content: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO session_messages (session_id, role, content, timestamp)
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(session_id)
+        .bind(role)
+        .bind(content)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| OrionError::Database(format!("Save message failed: {}", e)))?;
+        Ok(())
+    }
+
+    /// Get all messages for a session, ordered by ID.
+    pub async fn get_messages(&self, session_id: &str) -> Result<Vec<SessionMessage>> {
+        let rows = sqlx::query(
+            "SELECT id, session_id, role, content, timestamp
+             FROM session_messages
+             WHERE session_id = ?1
+             ORDER BY id ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| OrionError::Database(format!("Get messages failed: {}", e)))?;
+
+        Ok(rows
+            .iter()
+            .map(|r| SessionMessage {
+                id: r.get("id"),
+                session_id: r.get("session_id"),
+                role: r.get("role"),
+                content: r.get("content"),
+                timestamp: r.get("timestamp"),
+            })
+            .collect())
     }
 
     /// Find the most recent open (not closed) session.

@@ -31,10 +31,11 @@
 - [ ] **Instance health monitoring** — Heartbeat, auto-restart on crash, resource usage tracking
 
 ### Agent Capabilities
-- [ ] **Conversation compression** — Summarize old turns to stay within context window on long sessions
+- [ ] **Conversation compaction** — Summarize/compress older messages when approaching context window limits. Preserve system prompt + recent turns, store full transcript on disk via `orion-session`.
 - [ ] **Conversation history / context carry-over** — Load previous session context into new sessions for continuity
 - [ ] **Group followup messages** — Batch rapid user messages into a single agent turn
 - [ ] **Multi-provider implementation** — Trait-based LLM provider abstraction (OpenAI, Gemini, DeepSeek, Ollama, etc.) with runtime provider switching. Config structure is ready.
+- [ ] **Telegram markdown formatting** — Convert agent response markdown to Telegram MarkdownV2 (escape special chars, map code blocks, bold, italic, links). Currently sent as plain text, losing all formatting.
 - [ ] **File attachments** — Support image/file uploads in web UI and Telegram (vision, document analysis)
 - [ ] **MCP (Model Context Protocol) support** — Allow connecting external MCP servers as tool providers
 

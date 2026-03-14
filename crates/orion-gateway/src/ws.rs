@@ -169,6 +169,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     }
                 };
 
+                // Save user message
+                let _ = state.agent.session_mgr().save_message(&session_id, "user", &text).await;
+
                 // Send stream_start
                 if !send_msg(
                     &mut sender,
@@ -209,6 +212,17 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                                         }
                                     }
                                     ContentBlock::ToolUse { name, input, .. } => {
+                                        // Save tool_use as a message
+                                        let tool_json = serde_json::json!({
+                                            "type": "tool_use",
+                                            "name": name,
+                                            "input": input,
+                                        });
+                                        let _ = state.agent.session_mgr().save_message(
+                                            &session_id, "tool_use",
+                                            &serde_json::to_string(&tool_json).unwrap_or_default(),
+                                        ).await;
+
                                         if !send_msg(
                                             &mut sender,
                                             &ServerMessage::ToolUse {
@@ -245,6 +259,17 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                                         content_str
                                     };
 
+                                    // Save tool_result as a message
+                                    let tool_result_json = serde_json::json!({
+                                        "type": "tool_result",
+                                        "content": &preview,
+                                        "is_error": is_error.unwrap_or(false),
+                                    });
+                                    let _ = state.agent.session_mgr().save_message(
+                                        &session_id, "tool_result",
+                                        &serde_json::to_string(&tool_result_json).unwrap_or_default(),
+                                    ).await;
+
                                     if !send_msg(
                                         &mut sender,
                                         &ServerMessage::ToolResult {
@@ -271,6 +296,11 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                                 .agent
                                 .finalize_chat(&session_id, &text, &result_text, &result)
                                 .await;
+
+                            // Save assistant message
+                            if !result_text.is_empty() {
+                                let _ = state.agent.session_mgr().save_message(&session_id, "assistant", &result_text).await;
+                            }
 
                             let _ = send_msg(
                                 &mut sender,
