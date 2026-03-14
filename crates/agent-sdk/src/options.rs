@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::hooks::{HookCallbackMatcher, HookEvent};
 use crate::mcp::McpServerConfig;
+use crate::provider::LlmProvider;
 use crate::tools::executor::ToolResult;
 use crate::types::agent::AgentDefinition;
 use crate::types::permissions::{CanUseToolOptions, PermissionResult};
@@ -238,6 +239,9 @@ pub struct Options {
     /// These are typically used with `external_tool_handler` to register and handle
     /// tools that aren't part of the built-in set (e.g. MemorySearch, VaultGet).
     pub custom_tool_definitions: Vec<CustomToolDefinition>,
+
+    /// LLM provider to use. If `None`, defaults to `AnthropicProvider::from_env()`.
+    pub provider: Option<Box<dyn LlmProvider>>,
 }
 
 /// A custom tool definition to send to the Claude API.
@@ -312,6 +316,7 @@ impl Default for Options {
             prompt_suggestions: false,
             external_tool_handler: None,
             custom_tool_definitions: Vec::new(),
+            provider: None,
         }
     }
 }
@@ -472,6 +477,11 @@ impl OptionsBuilder {
 
     pub fn custom_tools(mut self, defs: Vec<CustomToolDefinition>) -> Self {
         self.options.custom_tool_definitions.extend(defs);
+        self
+    }
+
+    pub fn provider(mut self, provider: Box<dyn LlmProvider>) -> Self {
+        self.options.provider = Some(provider);
         self
     }
 

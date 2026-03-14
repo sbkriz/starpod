@@ -34,7 +34,7 @@
 ### Agent Capabilities
 - [ ] **Conversation compaction** — Summarize/compress older messages when approaching context window limits. Preserve system prompt + recent turns, store full transcript on disk via `orion-session`.
 - [ ] **Group followup messages** — Batch rapid user messages into a single agent turn
-- [ ] **Multi-provider implementation** — Trait-based LLM provider abstraction (OpenAI, Gemini, DeepSeek, Ollama, etc.) with runtime provider switching. Config structure is ready.
+- [x] **Multi-provider implementation** — Trait-based `LlmProvider` abstraction with `AnthropicProvider`, `OpenAiProvider` (also Groq, DeepSeek, OpenRouter, Ollama), and `GeminiProvider`. Runtime switching via `config.provider`. Per-provider cost rates, capabilities, and streaming support.
 - [ ] **Telegram markdown formatting** — Convert agent response markdown to Telegram MarkdownV2 (escape special chars, map code blocks, bold, italic, links). Currently sent as plain text, losing all formatting.
 - [ ] **File attachments** — Support image/file uploads in web UI and Telegram (vision, document analysis)
 - [ ] **MCP (Model Context Protocol) support** — Allow connecting external MCP servers as tool providers
