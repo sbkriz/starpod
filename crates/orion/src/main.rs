@@ -32,6 +32,17 @@ enum Commands {
         #[command(subcommand)]
         action: InstanceCommand,
     },
+
+    /// Open the documentation in your browser.
+    Docs {
+        /// Port to serve the docs on.
+        #[arg(short, long, default_value = "4321")]
+        port: u16,
+
+        /// Don't open the browser automatically.
+        #[arg(long)]
+        no_open: bool,
+    },
 }
 
 // ── Agent subcommands ──────────────────────────────────────────────────────
@@ -915,7 +926,89 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
+        // ── Docs command ─────────────────────────────────────────────
+        Commands::Docs { port, no_open } => {
+            serve_docs(port, no_open).await?;
+        }
     }
+
+    Ok(())
+}
+
+/// Serve the embedded documentation site.
+async fn serve_docs(port: u16, no_open: bool) -> anyhow::Result<()> {
+    use axum::{
+        Router,
+        response::{Html, IntoResponse, Response},
+    };
+    use http::{header, StatusCode};
+    use include_dir::{include_dir, Dir};
+
+    static DOCS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../docs/.vitepress/dist");
+
+    fn serve_file(path: &str) -> Response {
+        // Try exact path first
+        let file_path = if path.is_empty() { "index.html" } else { path };
+
+        if let Some(file) = DOCS_DIR.get_file(file_path) {
+            let mime = mime_from_path(file_path);
+            ([(header::CONTENT_TYPE, mime)], file.contents()).into_response()
+        } else if let Some(file) = DOCS_DIR.get_file(&format!("{}.html", file_path)) {
+            // VitePress clean URLs: /architecture -> architecture.html
+            let mime = mime_from_path(&format!("{}.html", file_path));
+            ([(header::CONTENT_TYPE, mime)], file.contents()).into_response()
+        } else if let Some(file) = DOCS_DIR.get_file(&format!("{}/index.html", file_path)) {
+            let mime = "text/html; charset=utf-8";
+            ([(header::CONTENT_TYPE, mime)], file.contents()).into_response()
+        } else {
+            // Fallback to 404.html
+            if let Some(file) = DOCS_DIR.get_file("404.html") {
+                (StatusCode::NOT_FOUND, Html(String::from_utf8_lossy(file.contents()).to_string())).into_response()
+            } else {
+                (StatusCode::NOT_FOUND, "Not found").into_response()
+            }
+        }
+    }
+
+    fn mime_from_path(path: &str) -> &'static str {
+        match path.rsplit('.').next() {
+            Some("html") => "text/html; charset=utf-8",
+            Some("css") => "text/css; charset=utf-8",
+            Some("js") => "application/javascript; charset=utf-8",
+            Some("json") => "application/json",
+            Some("svg") => "image/svg+xml",
+            Some("png") => "image/png",
+            Some("jpg" | "jpeg") => "image/jpeg",
+            Some("woff2") => "font/woff2",
+            Some("woff") => "font/woff",
+            _ => "application/octet-stream",
+        }
+    }
+
+    let app = Router::new()
+        .fallback(|uri: axum::http::Uri| async move {
+            let path = uri.path().trim_start_matches('/');
+            serve_file(path)
+        });
+
+    let addr: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
+    let url = format!("http://localhost:{}", port);
+
+    println!();
+    println!(
+        "  {} Serving docs at {}",
+        "📖".to_string(),
+        url.bright_white()
+    );
+    println!("  {} Press {} to stop.", "→".dimmed(), "Ctrl+C".bright_yellow());
+    println!();
+
+    if !no_open {
+        let _ = open::that(&url);
+    }
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await?;
 
     Ok(())
 }
