@@ -92,12 +92,11 @@ pub struct TelegramConfig {
     /// If empty, no one can chat (only /start works to show the user their ID).
     #[serde(default)]
     pub allowed_users: Vec<u64>,
-    /// Streaming mode: "edit_in_place" or "off" (default: "off").
+    /// Message mode: "final_only" (default) sends only the last assistant
+    /// message; "all_messages" sends each assistant message as a standalone
+    /// Telegram message (tool-use messages are excluded).
     #[serde(default = "default_stream_mode")]
     pub stream_mode: String,
-    /// Minimum interval between edit-in-place updates (ms).
-    #[serde(default = "default_edit_throttle_ms")]
-    pub edit_throttle_ms: u64,
 }
 
 impl Default for TelegramConfig {
@@ -106,17 +105,12 @@ impl Default for TelegramConfig {
             bot_token: None,
             allowed_users: Vec::new(),
             stream_mode: default_stream_mode(),
-            edit_throttle_ms: default_edit_throttle_ms(),
         }
     }
 }
 
 fn default_stream_mode() -> String {
-    "off".to_string()
-}
-
-fn default_edit_throttle_ms() -> u64 {
-    300
+    "final_only".to_string()
 }
 
 // ── Main config ──────────────────────────────────────────────────────────
@@ -392,7 +386,6 @@ server_addr = "127.0.0.1:3000"
 [telegram]
 # bot_token = "123456:ABC..."     # Or set TELEGRAM_BOT_TOKEN env var
 # allowed_users = [123456789]     # User IDs allowed to chat (empty = no one)
-# stream_mode = "off"             # "edit_in_place" or "off"
-# edit_throttle_ms = 300          # Min interval between streaming edits
+# stream_mode = "final_only"      # "final_only" or "all_messages"
 "#;
 }

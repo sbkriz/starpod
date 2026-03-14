@@ -236,8 +236,7 @@ pub fn generate_config(result: &OnboardingResult) -> String {
         Some(uid) => config.push_str(&format!("allowed_users = [{}]\n", uid)),
         None => config.push_str("# allowed_users = [123456789]     # User IDs allowed to chat (empty = no one)\n"),
     }
-    config.push_str("# stream_mode = \"off\"             # \"edit_in_place\" or \"off\"\n");
-    config.push_str("# edit_throttle_ms = 300          # Min interval between streaming edits\n");
+    config.push_str("# stream_mode = \"final_only\"      # \"final_only\" or \"all_messages\"\n");
 
     config
 }

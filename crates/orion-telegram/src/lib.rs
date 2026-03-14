@@ -17,11 +17,10 @@ const MAX_MSG_LEN: usize = 4096;
 #[derive(Clone)]
 struct AllowedUsers(Arc<HashSet<u64>>);
 
-/// Streaming config passed through teloxide DI.
+/// Message delivery config passed through teloxide DI.
 #[derive(Clone)]
 struct StreamConfig {
     stream_mode: String,
-    edit_throttle_ms: u64,
 }
 
 /// Agent display name for greetings.
@@ -62,7 +61,6 @@ pub async fn run_with_agent_filtered(
     let allowed = AllowedUsers(Arc::new(allowed_users.into_iter().collect()));
     let stream_cfg = StreamConfig {
         stream_mode: agent.config().telegram.stream_mode.clone(),
-        edit_throttle_ms: agent.config().telegram.edit_throttle_ms,
     };
     let agent_name = AgentName(agent.config().identity.display_name().to_string());
 
@@ -159,103 +157,81 @@ async fn handle_message(
         .await
         .ok();
 
-    if stream_cfg.stream_mode == "edit_in_place" {
-        handle_streaming(&bot, chat_id, &agent, &text, user_id_str, stream_cfg.edit_throttle_ms).await
+    if stream_cfg.stream_mode == "all_messages" {
+        handle_all_messages(&bot, chat_id, &agent, &text, user_id_str).await
     } else {
-        handle_blocking(&bot, chat_id, &agent, &text, user_id_str).await
+        handle_final_only(&bot, chat_id, &agent, &text, user_id_str).await
     }
 }
 
-/// Blocking mode: wait for full response, then send.
-async fn handle_blocking(
+/// Build a `ChatMessage` for Telegram.
+fn build_chat_msg(text: &str, user_id_str: Option<String>, chat_id: ChatId) -> ChatMessage {
+    ChatMessage {
+        text: text.to_string(),
+        user_id: user_id_str,
+        channel_id: Some("telegram".into()),
+        channel_session_key: Some(chat_id.0.to_string()),
+        attachments: Vec::new(),
+    }
+}
+
+/// Extract text content from an assistant message's content blocks.
+fn extract_assistant_text(content: &[ContentBlock]) -> String {
+    let mut text = String::new();
+    for block in content {
+        if let ContentBlock::Text { text: t } = block {
+            if !t.is_empty() {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(t);
+            }
+        }
+    }
+    text
+}
+
+/// Final-only mode (default): stream internally, send only the last
+/// assistant message when done. Each message sent as standalone.
+async fn handle_final_only(
     bot: &Bot,
     chat_id: ChatId,
     agent: &Arc<OrionAgent>,
     text: &str,
     user_id_str: Option<String>,
 ) -> Result<(), teloxide::RequestError> {
-    let chat_msg = ChatMessage {
-        text: text.to_string(),
-        user_id: user_id_str,
-        channel_id: Some("telegram".into()),
-        channel_session_key: Some(chat_id.0.to_string()),
-        attachments: Vec::new(),
-    };
-
-    match agent.chat(chat_msg).await {
-        Ok(response) => {
-            send_response(bot, chat_id, &response.text).await;
-        }
-        Err(e) => {
-            error!(error = %e, "Chat error");
-            bot.send_message(chat_id, format!("Sorry, an error occurred: {}", e))
-                .await?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Streaming mode: send a placeholder, then edit in-place as tokens arrive.
-async fn handle_streaming(
-    bot: &Bot,
-    chat_id: ChatId,
-    agent: &Arc<OrionAgent>,
-    text: &str,
-    _user_id_str: Option<String>,
-    throttle_ms: u64,
-) -> Result<(), teloxide::RequestError> {
-    // Send placeholder
-    let placeholder = bot.send_message(chat_id, "...").await?;
-    let msg_id = placeholder.id;
-
-    // Start streaming
-    let chat_msg = ChatMessage {
-        text: text.to_string(),
-        user_id: _user_id_str.clone(),
-        channel_id: Some("telegram".into()),
-        channel_session_key: Some(chat_id.0.to_string()),
-        attachments: Vec::new(),
-    };
-    let stream_result = agent.chat_stream(&chat_msg).await;
-    let (mut stream, session_id) = match stream_result {
+    let chat_msg = build_chat_msg(text, user_id_str, chat_id);
+    let (mut stream, session_id) = match agent.chat_stream(&chat_msg).await {
         Ok(s) => s,
         Err(e) => {
             error!(error = %e, "Failed to start stream");
-            bot.edit_message_text(chat_id, msg_id, format!("Error: {}", e))
-                .await
-                .ok();
+            bot.send_message(chat_id, format!("Sorry, an error occurred: {}", e))
+                .await?;
             return Ok(());
         }
     };
 
-    let mut accumulated = String::new();
-    let mut last_edit = tokio::time::Instant::now();
-    let throttle = tokio::time::Duration::from_millis(throttle_ms);
+    let mut last_assistant_text = String::new();
+    let mut all_text = String::new();
     let mut result_msg = None;
 
     while let Some(msg_result) = stream.next().await {
         match msg_result {
             Ok(Message::Assistant(assistant)) => {
-                for block in &assistant.content {
-                    if let ContentBlock::Text { text } = block {
-                        accumulated.push_str(text);
+                let t = extract_assistant_text(&assistant.content);
+                if !t.is_empty() {
+                    last_assistant_text = t.clone();
+                    if !all_text.is_empty() {
+                        all_text.push('\n');
                     }
-                }
-
-                // Throttled edit
-                if last_edit.elapsed() >= throttle && !accumulated.is_empty() {
-                    let display = truncate_for_telegram(&accumulated);
-                    bot.edit_message_text(chat_id, msg_id, &display)
-                        .await
-                        .ok();
-                    last_edit = tokio::time::Instant::now();
+                    all_text.push_str(&t);
                 }
             }
             Ok(Message::Result(result)) => {
-                if accumulated.is_empty() {
-                    if let Some(text) = &result.result {
-                        accumulated = text.clone();
+                if last_assistant_text.is_empty() {
+                    if let Some(t) = &result.result {
+                        last_assistant_text = t.clone();
+                        all_text = t.clone();
                     }
                 }
                 result_msg = Some(result);
@@ -263,69 +239,304 @@ async fn handle_streaming(
             Ok(_) => {}
             Err(e) => {
                 error!(error = %e, "Stream error");
-                bot.edit_message_text(chat_id, msg_id, format!("Error: {}", e))
-                    .await
-                    .ok();
+                bot.send_message(chat_id, format!("Sorry, an error occurred: {}", e))
+                    .await?;
                 return Ok(());
             }
         }
     }
 
-    // Final edit with complete response
-    if accumulated.is_empty() {
-        bot.edit_message_text(chat_id, msg_id, "(no response)")
-            .await
-            .ok();
-    } else if accumulated.len() <= MAX_MSG_LEN {
-        // Try markdown first, fall back to plain text
-        if bot
-            .edit_message_text(chat_id, msg_id, &accumulated)
-            .parse_mode(ParseMode::MarkdownV2)
-            .await
-            .is_err()
-        {
-            bot.edit_message_text(chat_id, msg_id, &accumulated)
-                .await
-                .ok();
-        }
+    // Send only the last assistant message
+    if last_assistant_text.is_empty() {
+        bot.send_message(chat_id, "(no response)").await.ok();
     } else {
-        // Response too long for a single message — delete placeholder and send as chunks
-        bot.delete_message(chat_id, msg_id).await.ok();
-        send_response(bot, chat_id, &accumulated).await;
+        send_response(bot, chat_id, &last_assistant_text).await;
     }
 
     // Finalize (record usage, daily log)
     if let Some(ref result) = result_msg {
-        agent.finalize_chat(&session_id, text, &accumulated, result).await;
+        agent.finalize_chat(&session_id, text, &all_text, result).await;
+    }
+
+    Ok(())
+}
+
+/// All-messages mode: send each assistant text message as a standalone
+/// Telegram message as it arrives. Tool-use messages are excluded.
+async fn handle_all_messages(
+    bot: &Bot,
+    chat_id: ChatId,
+    agent: &Arc<OrionAgent>,
+    text: &str,
+    user_id_str: Option<String>,
+) -> Result<(), teloxide::RequestError> {
+    let chat_msg = build_chat_msg(text, user_id_str, chat_id);
+    let (mut stream, session_id) = match agent.chat_stream(&chat_msg).await {
+        Ok(s) => s,
+        Err(e) => {
+            error!(error = %e, "Failed to start stream");
+            bot.send_message(chat_id, format!("Sorry, an error occurred: {}", e))
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let mut all_text = String::new();
+    let mut result_msg = None;
+
+    while let Some(msg_result) = stream.next().await {
+        match msg_result {
+            Ok(Message::Assistant(assistant)) => {
+                let t = extract_assistant_text(&assistant.content);
+                if !t.is_empty() {
+                    if !all_text.is_empty() {
+                        all_text.push('\n');
+                    }
+                    all_text.push_str(&t);
+                    // Send immediately as standalone message
+                    send_response(bot, chat_id, &t).await;
+                }
+            }
+            Ok(Message::Result(result)) => {
+                if all_text.is_empty() {
+                    if let Some(t) = &result.result {
+                        all_text = t.clone();
+                        send_response(bot, chat_id, t).await;
+                    }
+                }
+                result_msg = Some(result);
+            }
+            Ok(_) => {}
+            Err(e) => {
+                error!(error = %e, "Stream error");
+                bot.send_message(chat_id, format!("Sorry, an error occurred: {}", e))
+                    .await?;
+                return Ok(());
+            }
+        }
+    }
+
+    if all_text.is_empty() {
+        bot.send_message(chat_id, "(no response)").await.ok();
+    }
+
+    // Finalize (record usage, daily log)
+    if let Some(ref result) = result_msg {
+        agent.finalize_chat(&session_id, text, &all_text, result).await;
     }
 
     Ok(())
 }
 
 /// Send a (possibly long) response as one or more messages.
+/// Converts markdown to Telegram HTML first, with plain-text fallback.
 async fn send_response(bot: &Bot, chat_id: ChatId, text: &str) {
-    let chunks = split_message(text, MAX_MSG_LEN);
-    for chunk in chunks {
-        bot.send_message(chat_id, &chunk)
-            .parse_mode(ParseMode::MarkdownV2)
-            .await
-            .or_else(|_| {
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current()
-                        .block_on(bot.send_message(chat_id, &chunk).send())
-                })
-            })
-            .ok();
+    let html = markdown_to_telegram_html(text);
+    let chunks = split_message(&html, MAX_MSG_LEN);
+    for chunk in &chunks {
+        let sent = bot
+            .send_message(chat_id, chunk)
+            .parse_mode(ParseMode::Html)
+            .await;
+        if sent.is_err() {
+            // Fallback: send as plain text
+            bot.send_message(chat_id, chunk).await.ok();
+        }
     }
 }
 
-/// Truncate text for Telegram's limit during streaming (no markdown).
-fn truncate_for_telegram(text: &str) -> String {
-    if text.len() <= MAX_MSG_LEN {
-        text.to_string()
-    } else {
-        format!("{}...", &text[..MAX_MSG_LEN - 3])
+/// Escape HTML special characters.
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// Convert standard markdown to Telegram-compatible HTML.
+///
+/// Handles: fenced code blocks, inline code, bold, italic, strikethrough,
+/// headings, and links. Falls back gracefully for unsupported syntax.
+fn markdown_to_telegram_html(input: &str) -> String {
+    // Phase 1: extract code blocks and inline code into placeholders
+    let mut placeholders: Vec<String> = Vec::new();
+    let mut text = input.to_string();
+
+    // Fenced code blocks: ```lang\n...\n```
+    loop {
+        let Some(start) = text.find("```") else {
+            break;
+        };
+        let after_fence = start + 3;
+        let rest = &text[after_fence..];
+        // Skip optional language tag (up to first newline)
+        let content_start = rest
+            .find('\n')
+            .map(|p| after_fence + p + 1)
+            .unwrap_or(after_fence);
+        let Some(end_offset) = text[content_start..].find("```") else {
+            break;
+        };
+        let end = content_start + end_offset;
+        let code = text[content_start..end].trim_end_matches('\n');
+        let html = format!("<pre>{}</pre>", escape_html(code));
+        let ph = format!("\x02PH{}\x02", placeholders.len());
+        placeholders.push(html);
+        text = format!("{}{}{}", &text[..start], ph, &text[end + 3..]);
     }
+
+    // Inline code: `...`
+    let mut buf = String::new();
+    let mut rest = text.as_str();
+    while let Some(start) = rest.find('`') {
+        buf.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        if let Some(end) = after.find('`') {
+            let code = &after[..end];
+            let html = format!("<code>{}</code>", escape_html(code));
+            let ph = format!("\x02PH{}\x02", placeholders.len());
+            placeholders.push(html);
+            buf.push_str(&ph);
+            rest = &after[end + 1..];
+        } else {
+            buf.push('`');
+            rest = after;
+        }
+    }
+    buf.push_str(rest);
+    text = buf;
+
+    // Phase 2: escape HTML in remaining text
+    text = escape_html(&text);
+
+    // Phase 3: convert markdown formatting
+
+    // Bold: **text** → <b>text</b>  (must run before italic)
+    let mut buf = String::new();
+    let mut rest = text.as_str();
+    while let Some(start) = rest.find("**") {
+        buf.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        if let Some(end) = after.find("**") {
+            buf.push_str("<b>");
+            buf.push_str(&after[..end]);
+            buf.push_str("</b>");
+            rest = &after[end + 2..];
+        } else {
+            buf.push_str("**");
+            rest = after;
+        }
+    }
+    buf.push_str(rest);
+    text = buf;
+
+    // Strikethrough: ~~text~~ → <s>text</s>
+    let mut buf = String::new();
+    let mut rest = text.as_str();
+    while let Some(start) = rest.find("~~") {
+        buf.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        if let Some(end) = after.find("~~") {
+            buf.push_str("<s>");
+            buf.push_str(&after[..end]);
+            buf.push_str("</s>");
+            rest = &after[end + 2..];
+        } else {
+            buf.push_str("~~");
+            rest = after;
+        }
+    }
+    buf.push_str(rest);
+    text = buf;
+
+    // Italic: *text* → <i>text</i>  (after bold has been removed)
+    let mut buf = String::new();
+    let mut rest = text.as_str();
+    while let Some(start) = rest.find('*') {
+        buf.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        // Bullet point: * at line start followed by space
+        let at_line_start = start == 0 || rest.as_bytes()[start - 1] == b'\n';
+        if at_line_start && after.starts_with(' ') {
+            buf.push('*');
+            rest = after;
+            continue;
+        }
+        // Not italic if followed by whitespace or end
+        if after.is_empty() || after.starts_with(' ') || after.starts_with('\n') {
+            buf.push('*');
+            rest = after;
+            continue;
+        }
+        if let Some(end) = after.find('*') {
+            if end > 0 && after.as_bytes()[end - 1] != b' ' {
+                buf.push_str("<i>");
+                buf.push_str(&after[..end]);
+                buf.push_str("</i>");
+                rest = &after[end + 1..];
+            } else {
+                buf.push('*');
+                rest = after;
+            }
+        } else {
+            buf.push('*');
+            rest = after;
+        }
+    }
+    buf.push_str(rest);
+    text = buf;
+
+    // Headings: # at line start → bold
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut new_lines: Vec<String> = Vec::with_capacity(lines.len());
+    for line in &lines {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            let content = trimmed.trim_start_matches('#').trim_start();
+            new_lines.push(format!("<b>{}</b>", content));
+        } else {
+            new_lines.push(line.to_string());
+        }
+    }
+    text = new_lines.join("\n");
+
+    // Links: [text](url) → <a href="url">text</a>
+    let mut buf = String::new();
+    let mut rest = text.as_str();
+    while let Some(start) = rest.find('[') {
+        buf.push_str(&rest[..start]);
+        let after_bracket = &rest[start + 1..];
+        if let Some(bracket_end) = after_bracket.find(']') {
+            let link_text = &after_bracket[..bracket_end];
+            let after_close = &after_bracket[bracket_end + 1..];
+            if after_close.starts_with('(') {
+                if let Some(paren_end) = after_close[1..].find(')') {
+                    let url = &after_close[1..1 + paren_end];
+                    // Restore &amp; in URLs back to &
+                    let url = url.replace("&amp;", "&");
+                    buf.push_str(&format!("<a href=\"{}\">{}</a>", url, link_text));
+                    rest = &after_close[1 + paren_end + 1..];
+                    continue;
+                }
+            }
+            buf.push('[');
+            rest = after_bracket;
+        } else {
+            buf.push('[');
+            rest = after_bracket;
+        }
+    }
+    buf.push_str(rest);
+    text = buf;
+
+    // Phase 4: restore placeholders
+    for (i, html) in placeholders.iter().enumerate() {
+        // Placeholders were HTML-escaped in phase 2, so \x02 became... no,
+        // \x02 is not an HTML special char, so it survives escape_html unchanged.
+        let ph = format!("\x02PH{}\x02", i);
+        text = text.replace(&ph, html);
+    }
+
+    text
 }
 
 /// Escape special characters for MarkdownV2.
@@ -420,5 +631,90 @@ mod tests {
     fn test_escape_md() {
         assert_eq!(escape_md("hello.world!"), "hello\\.world\\!");
         assert_eq!(escape_md("no specials"), "no specials");
+    }
+
+    #[test]
+    fn test_md_to_html_plain() {
+        assert_eq!(markdown_to_telegram_html("hello world"), "hello world");
+    }
+
+    #[test]
+    fn test_md_to_html_bold() {
+        assert_eq!(
+            markdown_to_telegram_html("this is **bold** text"),
+            "this is <b>bold</b> text"
+        );
+    }
+
+    #[test]
+    fn test_md_to_html_italic() {
+        assert_eq!(
+            markdown_to_telegram_html("this is *italic* text"),
+            "this is <i>italic</i> text"
+        );
+    }
+
+    #[test]
+    fn test_md_to_html_code_block() {
+        assert_eq!(
+            markdown_to_telegram_html("before\n```rust\nfn main() {}\n```\nafter"),
+            "before\n<pre>fn main() {}</pre>\nafter"
+        );
+    }
+
+    #[test]
+    fn test_md_to_html_inline_code() {
+        assert_eq!(
+            markdown_to_telegram_html("use `foo()` here"),
+            "use <code>foo()</code> here"
+        );
+    }
+
+    #[test]
+    fn test_md_to_html_heading() {
+        assert_eq!(
+            markdown_to_telegram_html("## My Heading\nsome text"),
+            "<b>My Heading</b>\nsome text"
+        );
+    }
+
+    #[test]
+    fn test_md_to_html_link() {
+        assert_eq!(
+            markdown_to_telegram_html("click [here](https://example.com)"),
+            "click <a href=\"https://example.com\">here</a>"
+        );
+    }
+
+    #[test]
+    fn test_md_to_html_escapes_html() {
+        assert_eq!(
+            markdown_to_telegram_html("a < b & c > d"),
+            "a &lt; b &amp; c &gt; d"
+        );
+    }
+
+    #[test]
+    fn test_md_to_html_code_preserves_special() {
+        assert_eq!(
+            markdown_to_telegram_html("run `x < 5 && y > 3`"),
+            "run <code>x &lt; 5 &amp;&amp; y &gt; 3</code>"
+        );
+    }
+
+    #[test]
+    fn test_md_to_html_bullet_not_italic() {
+        let input = "* item one\n* item two";
+        let html = markdown_to_telegram_html(input);
+        assert!(!html.contains("<i>"), "Bullet points should not become italic");
+        assert!(html.contains("* item one"));
+    }
+
+    #[test]
+    fn test_md_to_html_strikethrough() {
+        assert_eq!(
+            markdown_to_telegram_html("this is ~~deleted~~ text"),
+            "this is <s>deleted</s> text"
+        );
     }
 }
