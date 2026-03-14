@@ -192,16 +192,81 @@ orion cron runs "morning-reminder" --limit 20
 |------|---------|-------------|
 | `--limit`, `-l` | `10` | Maximum runs |
 
-## Instances (Preview)
+## Instances
+
+Manage remote cloud instances. Requires `instance_backend_url` in config or `ORION_INSTANCE_BACKEND_URL` env var.
+
+### `orion instance create`
+
+Create a new remote instance.
 
 ```bash
-orion instance create    # Create a remote instance (coming soon)
-orion instance list      # List running instances
-orion instance kill <id> # Kill an instance
+orion instance create
+orion instance create --name "my-bot" --region "us-east-1"
+```
+
+| Flag | Description |
+|------|-------------|
+| `--name`, `-n` | Display name for the instance |
+| `--region`, `-r` | Deployment region |
+
+### `orion instance list`
+
+List all instances with status and region.
+
+```bash
+orion instance list
+```
+
+### `orion instance kill`
+
+Terminate a running instance.
+
+```bash
+orion instance kill <id>
+```
+
+### `orion instance pause`
+
+Suspend a running instance.
+
+```bash
 orion instance pause <id>
+```
+
+### `orion instance restart`
+
+Resume a paused instance.
+
+```bash
 orion instance restart <id>
 ```
 
-::: info
-Instance management is a preview feature and not yet fully implemented.
-:::
+### `orion instance logs`
+
+Stream logs from a running instance. Output is colored by log level (error=red, warn=yellow, info=green, debug=dim).
+
+```bash
+orion instance logs <id>
+orion instance logs <id> --tail 100
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--tail`, `-t` | `50` | Number of recent log lines to stream |
+
+### `orion instance ssh`
+
+Open an SSH session to a running instance. Fetches connection info from the backend and spawns a native `ssh` process. Ephemeral keys are written to a temp file and cleaned up after the session.
+
+```bash
+orion instance ssh <id>
+```
+
+### `orion instance health`
+
+Display health metrics for an instance: CPU%, memory, disk, uptime, and last heartbeat.
+
+```bash
+orion instance health <id>
+```

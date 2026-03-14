@@ -51,6 +51,7 @@ export default defineConfig({
             { text: 'Cron & Scheduling', link: '/concepts/cron' },
             { text: 'Vault', link: '/concepts/vault' },
             { text: 'Agent Tools', link: '/concepts/tools' },
+            { text: 'Instances', link: '/concepts/instances' },
           ],
         },
         {
@@ -69,6 +70,7 @@ export default defineConfig({
             { text: 'Sessions', link: '/api-reference/sessions' },
             { text: 'Memory', link: '/api-reference/memory' },
             { text: 'Health', link: '/api-reference/health' },
+            { text: 'Instances', link: '/api-reference/instances' },
           ],
         },
         {
@@ -89,6 +91,7 @@ export default defineConfig({
             { text: 'orion-agent', link: '/crates/orion-agent' },
             { text: 'orion-gateway', link: '/crates/orion-gateway' },
             { text: 'orion-telegram', link: '/crates/orion-telegram' },
+            { text: 'orion-instances', link: '/crates/orion-instances' },
           ],
         },
       ],

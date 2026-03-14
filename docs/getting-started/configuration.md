@@ -32,6 +32,9 @@ server_addr = "127.0.0.1:3000"   # HTTP/WS server bind address
 [providers.openai]
 # api_key = "sk-..."              # Not yet implemented
 
+# ─── Instances ─────────────────────────────────────────
+# instance_backend_url = "https://api.orion.example.com"  # Or set ORION_INSTANCE_BACKEND_URL env var
+
 # ─── Telegram ──────────────────────────────────────────
 [telegram]
 # bot_token = "123456:ABC..."     # Or set TELEGRAM_BOT_TOKEN env var
@@ -105,3 +108,4 @@ Never commit API keys to version control. Use environment variables or add `.ori
 | `ANTHROPIC_API_KEY` | `providers.anthropic.api_key` |
 | `TELEGRAM_BOT_TOKEN` | `telegram.bot_token` |
 | `ORION_API_KEY` | API key auth for the HTTP/WS gateway |
+| `ORION_INSTANCE_BACKEND_URL` | `instance_backend_url` |
