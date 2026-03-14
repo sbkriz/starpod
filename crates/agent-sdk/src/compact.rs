@@ -97,6 +97,9 @@ pub fn build_summary_prompt(old_messages: &[ApiMessage]) -> String {
                         rendered.push_str(&format!("(thinking: {})\n", thinking));
                     }
                 }
+                ApiContentBlock::Image { .. } => {
+                    rendered.push_str("[image]\n");
+                }
             }
         }
         rendered.push('\n');

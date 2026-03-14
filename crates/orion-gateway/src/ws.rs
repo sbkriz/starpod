@@ -51,6 +51,15 @@ async fn ws_handler(
         .into_response()
 }
 
+/// A file attachment sent over WebSocket as base64.
+#[derive(Debug, Deserialize)]
+struct WsAttachment {
+    file_name: String,
+    mime_type: String,
+    /// Base64-encoded file data.
+    data: String,
+}
+
 /// Client → Server message.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
@@ -65,6 +74,8 @@ enum ClientMessage {
         channel_id: Option<String>,
         #[serde(default)]
         channel_session_key: Option<String>,
+        #[serde(default)]
+        attachments: Vec<WsAttachment>,
     },
 }
 
@@ -207,13 +218,41 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                 user_id,
                 channel_id,
                 channel_session_key,
+                attachments,
             } => {
+                // Validate and convert attachments
+                let mut chat_attachments = Vec::new();
+                for att in attachments {
+                    // Check size (approximate raw size from base64)
+                    let raw_size = att.data.len() * 3 / 4;
+                    if raw_size > orion_core::MAX_ATTACHMENT_SIZE {
+                        let _ = send_msg(
+                            &mut sender,
+                            &ServerMessage::Error {
+                                message: format!(
+                                    "File '{}' exceeds 20 MB limit ({:.1} MB)",
+                                    att.file_name,
+                                    raw_size as f64 / 1_048_576.0
+                                ),
+                            },
+                        )
+                        .await;
+                        continue;
+                    }
+                    chat_attachments.push(orion_core::Attachment {
+                        file_name: att.file_name,
+                        mime_type: att.mime_type,
+                        data: att.data,
+                    });
+                }
+
+                // Build ChatMessage for channel-aware session routing
                 let chat_msg = orion_core::ChatMessage {
                     text: text.clone(),
                     user_id,
                     channel_id: channel_id.or(Some("main".into())),
                     channel_session_key,
-                    attachments: Vec::new(),
+                    attachments: chat_attachments,
                 };
 
                 // If a stream is already active, handle according to followup_mode
@@ -325,7 +364,7 @@ async fn process_stream_with_followups(
             ws_msg = StreamExt::next(receiver) => {
                 match ws_msg {
                     Some(Ok(WsMessage::Text(text))) => {
-                        if let Ok(ClientMessage::Message { text, user_id, channel_id, channel_session_key }) = serde_json::from_str::<ClientMessage>(&text) {
+                        if let Ok(ClientMessage::Message { text, user_id, channel_id, channel_session_key, attachments: _ }) = serde_json::from_str::<ClientMessage>(&text) {
                             match followup_mode {
                                 FollowupMode::Inject => {
                                     debug!(text = %text, "Injecting followup into active agent loop");

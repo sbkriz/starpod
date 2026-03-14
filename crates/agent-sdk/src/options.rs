@@ -257,6 +257,9 @@ pub struct Options {
 
     /// Explicit API key. When set, bypasses the `ANTHROPIC_API_KEY` env var lookup.
     pub api_key: Option<String>,
+
+    /// File attachments to include in the first user message (images, PDFs, etc.).
+    pub attachments: Vec<QueryAttachment>,
 }
 
 /// A custom tool definition to send to the Claude API.
@@ -265,6 +268,17 @@ pub struct CustomToolDefinition {
     pub name: String,
     pub description: String,
     pub input_schema: serde_json::Value,
+}
+
+/// An attachment to include in the first user message sent to the API.
+#[derive(Debug, Clone)]
+pub struct QueryAttachment {
+    /// Original filename.
+    pub file_name: String,
+    /// MIME type (e.g. "image/png").
+    pub mime_type: String,
+    /// Base64-encoded data.
+    pub base64_data: String,
 }
 
 /// Type alias for external tool handler callback.
@@ -335,6 +349,7 @@ impl Default for Options {
             custom_tool_definitions: Vec::new(),
             followup_rx: None,
             api_key: None,
+            attachments: Vec::new(),
         }
     }
 }
@@ -515,6 +530,11 @@ impl OptionsBuilder {
 
     pub fn api_key(mut self, key: impl Into<String>) -> Self {
         self.options.api_key = Some(key.into());
+        self
+    }
+
+    pub fn attachments(mut self, attachments: Vec<QueryAttachment>) -> Self {
+        self.options.attachments = attachments;
         self
     }
 
