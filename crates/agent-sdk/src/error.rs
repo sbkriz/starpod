@@ -28,7 +28,7 @@ pub enum AgentError {
     SessionNotFound(String),
 
     #[error("Hook error: {0}")]
-    Hook(String),
+    Hook(#[from] starpod_hooks::HookError),
 
     #[error("MCP server error: {0}")]
     McpServer(String),

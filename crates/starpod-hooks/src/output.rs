@@ -1,8 +1,20 @@
+//! Hook output types — the data returned by hook callbacks to control agent behavior.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::types::permissions::PermissionUpdate;
+use crate::permissions::{PermissionDecision, PermissionUpdate};
 
-/// Hook return value - either async (fire-and-forget) or sync (blocking).
+/// Hook return value — either async (fire-and-forget) or sync (blocking).
+///
+/// # Example
+///
+/// ```
+/// use starpod_hooks::HookOutput;
+///
+/// // Default is a no-op sync output
+/// let output = HookOutput::default();
+/// assert!(matches!(output, HookOutput::Sync(_)));
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum HookOutput {
@@ -16,7 +28,7 @@ impl Default for HookOutput {
     }
 }
 
-/// Async hook output - the agent proceeds without waiting.
+/// Async hook output — the agent proceeds without waiting for the hook to finish.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AsyncHookOutput {
     /// Must be true to signal async mode.
@@ -27,7 +39,7 @@ pub struct AsyncHookOutput {
     pub async_timeout: Option<u64>,
 }
 
-/// Sync hook output - controls the agent's behavior.
+/// Sync hook output — controls the agent's behavior.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SyncHookOutput {
     /// Whether the agent should continue running after this hook.
@@ -123,14 +135,6 @@ pub enum HookSpecificOutput {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum PermissionDecision {
-    Allow,
-    Deny,
-    Ask,
-}
-
 /// Decision for PermissionRequest hook.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "behavior")]
@@ -149,4 +153,103 @@ pub enum PermissionRequestDecision {
         #[serde(skip_serializing_if = "Option::is_none")]
         interrupt: Option<bool>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_output_is_sync() {
+        let output = HookOutput::default();
+        assert!(matches!(output, HookOutput::Sync(_)));
+    }
+
+    #[test]
+    fn sync_output_default_has_no_fields_set() {
+        let sync = SyncHookOutput::default();
+        assert!(sync.should_continue.is_none());
+        assert!(sync.suppress_output.is_none());
+        assert!(sync.stop_reason.is_none());
+        assert!(sync.decision.is_none());
+        assert!(sync.system_message.is_none());
+        assert!(sync.reason.is_none());
+        assert!(sync.hook_specific_output.is_none());
+    }
+
+    #[test]
+    fn hook_decision_serde() {
+        let approve = HookDecision::Approve;
+        let json = serde_json::to_string(&approve).unwrap();
+        assert_eq!(json, "\"approve\"");
+
+        let block = HookDecision::Block;
+        let json = serde_json::to_string(&block).unwrap();
+        assert_eq!(json, "\"block\"");
+    }
+
+    #[test]
+    fn async_output_roundtrip() {
+        let output = HookOutput::Async(AsyncHookOutput {
+            is_async: true,
+            async_timeout: Some(5000),
+        });
+        let json = serde_json::to_string(&output).unwrap();
+        assert!(json.contains("\"async\":true"));
+        assert!(json.contains("5000"));
+    }
+
+    #[test]
+    fn sync_output_with_decision_roundtrip() {
+        let output = HookOutput::Sync(SyncHookOutput {
+            should_continue: Some(false),
+            decision: Some(HookDecision::Block),
+            reason: Some("blocked by policy".into()),
+            ..Default::default()
+        });
+        let json = serde_json::to_string(&output).unwrap();
+        let back: HookOutput = serde_json::from_str(&json).unwrap();
+        match back {
+            HookOutput::Sync(sync) => {
+                assert_eq!(sync.should_continue, Some(false));
+                assert_eq!(sync.decision, Some(HookDecision::Block));
+                assert_eq!(sync.reason.as_deref(), Some("blocked by policy"));
+            }
+            _ => panic!("expected Sync output"),
+        }
+    }
+
+    #[test]
+    fn pre_tool_use_specific_output() {
+        let specific = HookSpecificOutput::PreToolUse {
+            permission_decision: Some(PermissionDecision::Deny),
+            permission_decision_reason: Some("not allowed".into()),
+            updated_input: None,
+            additional_context: Some("context".into()),
+        };
+        let json = serde_json::to_string(&specific).unwrap();
+        assert!(json.contains("\"hookEventName\":\"PreToolUse\""));
+        assert!(json.contains("\"permission_decision\":\"deny\""));
+    }
+
+    #[test]
+    fn permission_request_decision_allow() {
+        let decision = PermissionRequestDecision::Allow {
+            updated_input: None,
+            updated_permissions: None,
+        };
+        let json = serde_json::to_string(&decision).unwrap();
+        assert!(json.contains("\"behavior\":\"allow\""));
+    }
+
+    #[test]
+    fn permission_request_decision_deny_with_message() {
+        let decision = PermissionRequestDecision::Deny {
+            message: Some("no access".into()),
+            interrupt: Some(true),
+        };
+        let json = serde_json::to_string(&decision).unwrap();
+        assert!(json.contains("\"behavior\":\"deny\""));
+        assert!(json.contains("no access"));
+    }
 }

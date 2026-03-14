@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+// Re-export shared permission types from starpod-hooks
+pub use starpod_hooks::{PermissionLevel, PermissionUpdate};
+
 /// Result of a permission check from the `can_use_tool` callback.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "behavior")]
@@ -22,21 +25,6 @@ pub enum PermissionResult {
         #[serde(skip_serializing_if = "Option::is_none")]
         tool_use_id: Option<String>,
     },
-}
-
-/// A permission update suggestion.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PermissionUpdate {
-    pub tool: String,
-    pub permission: PermissionLevel,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum PermissionLevel {
-    Allow,
-    Deny,
-    Ask,
 }
 
 /// Options passed to the `can_use_tool` callback.

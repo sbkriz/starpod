@@ -7,9 +7,7 @@
 use agent_sdk::{
     hook_fn, query, HookCallbackMatcher, HookEvent, HookInput, HookOutput, Message, Options,
 };
-use agent_sdk::hooks::output::{
-    HookSpecificOutput, PermissionDecision, SyncHookOutput,
-};
+use starpod_hooks::{HookSpecificOutput, PermissionDecision, SyncHookOutput};
 use tokio_stream::StreamExt;
 
 #[tokio::main]
