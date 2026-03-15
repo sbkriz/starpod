@@ -32,6 +32,7 @@ let currentBubble = null
 let reconnectAttempt = 0
 let toolCounter = 0
 let currentSessionId = null
+let currentSessionKey = crypto.randomUUID()
 let pendingAttachments = []
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
@@ -539,7 +540,7 @@ function sendMessage() {
   isStreaming = true
   sendBtn.disabled = true
 
-  const payload = { type: 'message', text, channel_id: 'web' }
+  const payload = { type: 'message', text, channel_id: 'web', channel_session_key: currentSessionKey }
   if (pendingAttachments.length > 0) payload.attachments = pendingAttachments
   ws.send(JSON.stringify(payload))
 
@@ -589,6 +590,7 @@ const welcomeHTML =
 
 function newChat() {
   currentSessionId = null
+  currentSessionKey = crypto.randomUUID()
   messages.innerHTML = welcomeHTML
   closeSidebar()
   inputText.focus()
@@ -658,6 +660,7 @@ function renderSessions(sessions) {
 
 function selectSession(session) {
   currentSessionId = session.id
+  currentSessionKey = session.channel_session_key || crypto.randomUUID()
   // Update active state in sidebar
   sessionList.querySelectorAll('.session-item').forEach(el => {
     el.classList.toggle('active', el._sessionId === session.id)
