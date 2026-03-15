@@ -77,19 +77,26 @@ function formatText(text) {
   html = html.replace(/`([^`]+)`/g, '<code class="bg-elevated border border-border-subtle px-1.5 py-0.5 rounded font-mono text-[12.5px] text-accent-soft">$1</code>')
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="text-primary font-semibold">$1</strong>')
   html = html.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>')
-  html = html.replace(/(?<![="'])(https?:\/\/[^\s<>"')\]]+)/g, '<a href="#" rel="noopener" class="text-accent-soft underline decoration-accent/30 hover:decoration-accent transition-colors cursor-pointer link-preview" data-url="$1">$1</a>')
+  html = html.replace(/(?<![="'])(https?:\/\/[^\s<>"')\]]+)/g, (_, url) => {
+    const safeUrl = url.replace(/'/g, "\\'")
+    return '<a onclick="event.preventDefault();window._openPreview(\'' + safeUrl + '\')" href="#" class="text-accent-soft underline decoration-accent/30 hover:decoration-accent transition-colors cursor-pointer link-preview">' + url + '</a>'
+  })
   return html
 }
 
 function formatUserText(text) {
   let html = escapeHtml(text)
-  html = html.replace(/(?<![="'])(https?:\/\/[^\s<>"')\]]+)/g, '<a href="#" rel="noopener" class="text-white/80 underline decoration-white/30 hover:decoration-white/60 transition-colors cursor-pointer link-preview" data-url="$1">$1</a>')
+  html = html.replace(/(?<![="'])(https?:\/\/[^\s<>"')\]]+)/g, (_, url) => {
+    const safeUrl = url.replace(/'/g, "\\'")
+    return '<a onclick="event.preventDefault();window._openPreview(\'' + safeUrl + '\')" href="#" class="text-white/80 underline decoration-white/30 hover:decoration-white/60 transition-colors cursor-pointer link-preview">' + url + '</a>'
+  })
   return html
 }
 
 // ── Link preview panel ──
 let previewLoadTimer = null
 
+window._openPreview = openPreview
 function openPreview(url) {
   previewUrl.textContent = url
   previewOpen.href = url
@@ -139,16 +146,6 @@ function showPreviewFallback() {
   previewFallback.classList.add('flex')
 }
 
-// Intercept link clicks on the messages container (capture phase for reliability)
-document.getElementById('messages').addEventListener('click', (e) => {
-  const link = e.target.closest('.link-preview')
-  if (link) {
-    e.preventDefault()
-    e.stopPropagation()
-    const url = link.dataset.url
-    if (url) openPreview(url)
-  }
-}, true)
 
 // Close preview with Escape
 document.addEventListener('keydown', (e) => {
