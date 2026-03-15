@@ -10,7 +10,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
-use futures::Stream;
+use futures::stream::FuturesUnordered;
+use futures::{Stream, StreamExt as FuturesStreamExt};
 use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -662,8 +663,15 @@ async fn run_agent_loop(
         num_turns += 1;
         let mut tool_results: Vec<ApiContentBlock> = Vec::new();
 
+        // Phase 1: Evaluate permissions sequentially (may involve user interaction)
+        struct PermittedTool {
+            tool_use_id: String,
+            tool_name: String,
+            actual_input: serde_json::Value,
+        }
+        let mut permitted_tools: Vec<PermittedTool> = Vec::new();
+
         for (tool_use_id, tool_name, tool_input) in &tool_uses {
-            // Check permissions
             let verdict = permission_eval
                 .evaluate(tool_name, tool_input, tool_use_id, &session_id, &cwd)
                 .await?;
@@ -675,57 +683,10 @@ async fn run_agent_loop(
 
             match verdict {
                 PermissionVerdict::Allow | PermissionVerdict::AllowWithUpdatedInput(_) => {
-                    // Execute the tool — try external handler first, then built-in
-                    debug!(tool = %tool_name, "Executing tool");
-                    let tool_result = if let Some(ref handler) = options.external_tool_handler {
-                        let ext_result = handler(tool_name.clone(), actual_input.clone()).await;
-                        if let Some(tr) = ext_result {
-                            tr
-                        } else {
-                            // External handler didn't handle it — fall through to built-in
-                            match tool_executor.execute(tool_name, actual_input.clone()).await {
-                                Ok(tr) => tr,
-                                Err(e) => ToolResult {
-                                    content: format!("Tool execution error: {}", e),
-                                    is_error: true,
-                                    raw_content: None,
-                                },
-                            }
-                        }
-                    } else {
-                        match tool_executor.execute(tool_name, actual_input.clone()).await {
-                            Ok(tr) => tr,
-                            Err(e) => ToolResult {
-                                content: format!("Tool execution error: {}", e),
-                                is_error: true,
-                                raw_content: None,
-                            },
-                        }
-                    };
-
-                    // Run PostToolUse hooks
-                    hook_registry.run_post_tool_use(
-                        tool_name,
-                        &actual_input,
-                        &serde_json::to_value(&tool_result.content).unwrap_or_default(),
-                        tool_use_id,
-                        &session_id,
-                        &cwd,
-                    ).await;
-
-                    let result_content = tool_result
-                        .raw_content
-                        .unwrap_or_else(|| json!(tool_result.content));
-
-                    tool_results.push(ApiContentBlock::ToolResult {
+                    permitted_tools.push(PermittedTool {
                         tool_use_id: tool_use_id.clone(),
-                        content: result_content,
-                        is_error: if tool_result.is_error {
-                            Some(true)
-                        } else {
-                            None
-                        },
-                        cache_control: None, // set below on the last result
+                        tool_name: tool_name.clone(),
+                        actual_input,
                     });
                 }
                 PermissionVerdict::Deny { reason } => {
@@ -736,41 +697,124 @@ async fn run_agent_loop(
                         tool_input: tool_input.clone(),
                     });
 
-                    tool_results.push(ApiContentBlock::ToolResult {
+                    let api_block = ApiContentBlock::ToolResult {
                         tool_use_id: tool_use_id.clone(),
                         content: json!(format!("Permission denied: {}", reason)),
                         is_error: Some(true),
-                        cache_control: None, // set below on the last result
+                        cache_control: None,
+                    };
+
+                    // Stream denial result to frontend immediately
+                    let denial_msg = Message::User(UserMessage {
+                        uuid: Some(Uuid::new_v4()),
+                        session_id: session_id.clone(),
+                        content: vec![api_block_to_content_block(&api_block)],
+                        parent_tool_use_id: None,
+                        is_synthetic: true,
+                        tool_use_result: None,
                     });
+                    if options.persist_session {
+                        let _ = session
+                            .append_message(&serde_json::to_value(&denial_msg).unwrap_or_default())
+                            .await;
+                    }
+                    if tx.send(Ok(denial_msg)).is_err() {
+                        return Ok(());
+                    }
+
+                    tool_results.push(api_block);
                 }
             }
         }
 
-        // Emit user message with tool results
-        let user_result_blocks: Vec<ContentBlock> = tool_results
+        // Phase 2: Execute permitted tools concurrently, stream results as they complete
+        let mut futs: FuturesUnordered<_> = permitted_tools
             .iter()
-            .map(api_block_to_content_block)
+            .map(|pt| {
+                let handler = &options.external_tool_handler;
+                let executor = &tool_executor;
+                let name = &pt.tool_name;
+                let input = &pt.actual_input;
+                let id = &pt.tool_use_id;
+                async move {
+                    debug!(tool = %name, "Executing tool");
+                    let tool_result = if let Some(ref handler) = handler {
+                        let ext_result = handler(name.clone(), input.clone()).await;
+                        if let Some(tr) = ext_result {
+                            tr
+                        } else {
+                            match executor.execute(name, input.clone()).await {
+                                Ok(tr) => tr,
+                                Err(e) => ToolResult {
+                                    content: format!("Tool execution error: {}", e),
+                                    is_error: true,
+                                    raw_content: None,
+                                },
+                            }
+                        }
+                    } else {
+                        match executor.execute(name, input.clone()).await {
+                            Ok(tr) => tr,
+                            Err(e) => ToolResult {
+                                content: format!("Tool execution error: {}", e),
+                                is_error: true,
+                                raw_content: None,
+                            },
+                        }
+                    };
+                    (id.as_str(), name.as_str(), input, tool_result)
+                }
+            })
             .collect();
 
-        let user_msg = Message::User(UserMessage {
-            uuid: Some(Uuid::new_v4()),
-            session_id: session_id.clone(),
-            content: user_result_blocks,
-            parent_tool_use_id: None,
-            is_synthetic: true,
-            tool_use_result: None,
-        });
+        while let Some((tool_use_id, tool_name, actual_input, tool_result)) = futs.next().await {
+            // Run PostToolUse hooks
+            hook_registry.run_post_tool_use(
+                tool_name,
+                actual_input,
+                &serde_json::to_value(&tool_result.content).unwrap_or_default(),
+                tool_use_id,
+                &session_id,
+                &cwd,
+            ).await;
 
-        if options.persist_session {
-            let _ = session
-                .append_message(&serde_json::to_value(&user_msg).unwrap_or_default())
-                .await;
-        }
-        if tx.send(Ok(user_msg)).is_err() {
-            return Ok(());
+            let result_content = tool_result
+                .raw_content
+                .unwrap_or_else(|| json!(tool_result.content));
+
+            let api_block = ApiContentBlock::ToolResult {
+                tool_use_id: tool_use_id.to_string(),
+                content: result_content,
+                is_error: if tool_result.is_error {
+                    Some(true)
+                } else {
+                    None
+                },
+                cache_control: None,
+            };
+
+            // Stream this individual result to the frontend immediately
+            let result_msg = Message::User(UserMessage {
+                uuid: Some(Uuid::new_v4()),
+                session_id: session_id.clone(),
+                content: vec![api_block_to_content_block(&api_block)],
+                parent_tool_use_id: None,
+                is_synthetic: true,
+                tool_use_result: None,
+            });
+            if options.persist_session {
+                let _ = session
+                    .append_message(&serde_json::to_value(&result_msg).unwrap_or_default())
+                    .await;
+            }
+            if tx.send(Ok(result_msg)).is_err() {
+                return Ok(());
+            }
+
+            tool_results.push(api_block);
         }
 
-        // Add tool results to conversation
+        // Add all tool results to conversation for the next API call
         conversation.push(ApiMessage {
             role: "user".to_string(),
             content: tool_results,
@@ -1036,4 +1080,450 @@ fn build_error_result_message(
         structured_output: None,
         errors: vec![error_msg.to_string()],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// Helper: execute tools concurrently using the same FuturesUnordered pattern
+    /// as the production code, collecting (tool_use_id, content, completion_order).
+    async fn run_concurrent_tools(
+        tools: Vec<(String, String, serde_json::Value)>,
+        handler: impl Fn(String, serde_json::Value) -> Pin<Box<dyn futures::Future<Output = Option<ToolResult>> + Send>>,
+    ) -> Vec<(String, String, usize)> {
+        let order = Arc::new(AtomicUsize::new(0));
+        let handler = Arc::new(handler);
+
+        struct PermittedTool {
+            tool_use_id: String,
+            tool_name: String,
+            actual_input: serde_json::Value,
+        }
+
+        let permitted: Vec<PermittedTool> = tools
+            .into_iter()
+            .map(|(id, name, input)| PermittedTool {
+                tool_use_id: id,
+                tool_name: name,
+                actual_input: input,
+            })
+            .collect();
+
+        let mut futs: FuturesUnordered<_> = permitted
+            .iter()
+            .map(|pt| {
+                let handler = handler.clone();
+                let order = order.clone();
+                let name = pt.tool_name.clone();
+                let input = pt.actual_input.clone();
+                let id = pt.tool_use_id.clone();
+                async move {
+                    let result = handler(name, input).await;
+                    let seq = order.fetch_add(1, Ordering::SeqCst);
+                    (id, result, seq)
+                }
+            })
+            .collect();
+
+        let mut results = Vec::new();
+        while let Some((id, result, seq)) = futs.next().await {
+            let content = result
+                .map(|r| r.content)
+                .unwrap_or_else(|| "no handler".into());
+            results.push((id, content, seq));
+        }
+        results
+    }
+
+    #[tokio::test]
+    async fn concurrent_tools_all_complete() {
+        let results = run_concurrent_tools(
+            vec![
+                ("t1".into(), "Read".into(), json!({"path": "a.txt"})),
+                ("t2".into(), "Read".into(), json!({"path": "b.txt"})),
+                ("t3".into(), "Read".into(), json!({"path": "c.txt"})),
+            ],
+            |name, input| {
+                Box::pin(async move {
+                    let path = input["path"].as_str().unwrap_or("?");
+                    Some(ToolResult {
+                        content: format!("{}: {}", name, path),
+                        is_error: false,
+                        raw_content: None,
+                    })
+                })
+            },
+        )
+        .await;
+
+        assert_eq!(results.len(), 3);
+        let ids: Vec<&str> = results.iter().map(|(id, _, _)| id.as_str()).collect();
+        assert!(ids.contains(&"t1"));
+        assert!(ids.contains(&"t2"));
+        assert!(ids.contains(&"t3"));
+    }
+
+    #[tokio::test]
+    async fn slow_tool_does_not_block_fast_tools() {
+        let start = Instant::now();
+
+        let results = run_concurrent_tools(
+            vec![
+                ("slow".into(), "Bash".into(), json!({})),
+                ("fast1".into(), "Read".into(), json!({})),
+                ("fast2".into(), "Read".into(), json!({})),
+            ],
+            |name, _input| {
+                Box::pin(async move {
+                    if name == "Bash" {
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        Some(ToolResult {
+                            content: "slow done".into(),
+                            is_error: false,
+                            raw_content: None,
+                        })
+                    } else {
+                        // Fast tools complete immediately
+                        Some(ToolResult {
+                            content: "fast done".into(),
+                            is_error: false,
+                            raw_content: None,
+                        })
+                    }
+                })
+            },
+        )
+        .await;
+
+        let elapsed = start.elapsed();
+
+        // All three should complete
+        assert_eq!(results.len(), 3);
+
+        // Fast tools should complete before the slow tool (lower order index)
+        let slow = results.iter().find(|(id, _, _)| id == "slow").unwrap();
+        let fast1 = results.iter().find(|(id, _, _)| id == "fast1").unwrap();
+        let fast2 = results.iter().find(|(id, _, _)| id == "fast2").unwrap();
+
+        assert!(fast1.2 < slow.2, "fast1 should complete before slow");
+        assert!(fast2.2 < slow.2, "fast2 should complete before slow");
+
+        // Total time should be ~200ms (concurrent), not ~400ms+ (sequential)
+        assert!(
+            elapsed < Duration::from_millis(400),
+            "elapsed {:?} should be under 400ms (concurrent execution)",
+            elapsed
+        );
+    }
+
+    #[tokio::test]
+    async fn results_streamed_individually_as_they_complete() {
+        // Simulate the streaming pattern from the production code:
+        // each tool result is sent to the channel as it completes.
+        let (tx, mut rx) = mpsc::unbounded_channel::<(String, String)>();
+
+        let tools = vec![
+            ("t_slow".into(), "Slow".into(), json!({})),
+            ("t_fast".into(), "Fast".into(), json!({})),
+        ];
+
+        struct PT {
+            tool_use_id: String,
+            tool_name: String,
+        }
+
+        let permitted: Vec<PT> = tools
+            .into_iter()
+            .map(|(id, name, _)| PT {
+                tool_use_id: id,
+                tool_name: name,
+            })
+            .collect();
+
+        let mut futs: FuturesUnordered<_> = permitted
+            .iter()
+            .map(|pt| {
+                let name = pt.tool_name.clone();
+                let id = pt.tool_use_id.clone();
+                async move {
+                    if name == "Slow" {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    let result = ToolResult {
+                        content: format!("{} result", name),
+                        is_error: false,
+                        raw_content: None,
+                    };
+                    (id, result)
+                }
+            })
+            .collect();
+
+        // Process results as they complete (like production code)
+        while let Some((id, result)) = futs.next().await {
+            tx.send((id, result.content)).unwrap();
+        }
+        drop(tx);
+
+        // Collect what was streamed
+        let mut streamed = Vec::new();
+        while let Some(item) = rx.recv().await {
+            streamed.push(item);
+        }
+
+        assert_eq!(streamed.len(), 2);
+        // Fast should arrive first
+        assert_eq!(streamed[0].0, "t_fast");
+        assert_eq!(streamed[0].1, "Fast result");
+        assert_eq!(streamed[1].0, "t_slow");
+        assert_eq!(streamed[1].1, "Slow result");
+    }
+
+    #[tokio::test]
+    async fn error_tool_does_not_prevent_other_tools() {
+        let results = run_concurrent_tools(
+            vec![
+                ("t_ok".into(), "Read".into(), json!({})),
+                ("t_err".into(), "Fail".into(), json!({})),
+            ],
+            |name, _input| {
+                Box::pin(async move {
+                    if name == "Fail" {
+                        Some(ToolResult {
+                            content: "something went wrong".into(),
+                            is_error: true,
+                            raw_content: None,
+                        })
+                    } else {
+                        Some(ToolResult {
+                            content: "ok".into(),
+                            is_error: false,
+                            raw_content: None,
+                        })
+                    }
+                })
+            },
+        )
+        .await;
+
+        assert_eq!(results.len(), 2);
+        let ok = results.iter().find(|(id, _, _)| id == "t_ok").unwrap();
+        let err = results.iter().find(|(id, _, _)| id == "t_err").unwrap();
+        assert_eq!(ok.1, "ok");
+        assert_eq!(err.1, "something went wrong");
+    }
+
+    #[tokio::test]
+    async fn external_handler_none_falls_through_correctly() {
+        // When handler returns None for a tool, the production code falls through
+        // to the built-in executor. Test that the pattern works.
+        let results = run_concurrent_tools(
+            vec![
+                ("t_custom".into(), "MyTool".into(), json!({"x": 1})),
+                ("t_builtin".into(), "Read".into(), json!({"path": "/tmp"})),
+            ],
+            |name, _input| {
+                Box::pin(async move {
+                    if name == "MyTool" {
+                        Some(ToolResult {
+                            content: "custom handled".into(),
+                            is_error: false,
+                            raw_content: None,
+                        })
+                    } else {
+                        // Returns None => would fall through to built-in executor
+                        None
+                    }
+                })
+            },
+        )
+        .await;
+
+        assert_eq!(results.len(), 2);
+        let custom = results.iter().find(|(id, _, _)| id == "t_custom").unwrap();
+        let builtin = results.iter().find(|(id, _, _)| id == "t_builtin").unwrap();
+        assert_eq!(custom.1, "custom handled");
+        assert_eq!(builtin.1, "no handler"); // our test helper treats None as "no handler"
+    }
+
+    #[tokio::test]
+    async fn single_tool_works_same_as_before() {
+        let results = run_concurrent_tools(
+            vec![("t1".into(), "Read".into(), json!({"path": "file.txt"}))],
+            |_name, _input| {
+                Box::pin(async move {
+                    Some(ToolResult {
+                        content: "file contents".into(),
+                        is_error: false,
+                        raw_content: None,
+                    })
+                })
+            },
+        )
+        .await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "t1");
+        assert_eq!(results[0].1, "file contents");
+        assert_eq!(results[0].2, 0); // first (and only) completion
+    }
+
+    #[tokio::test]
+    async fn empty_tool_list_produces_no_results() {
+        let results = run_concurrent_tools(vec![], |_name, _input| {
+            Box::pin(async move { None })
+        })
+        .await;
+
+        assert_eq!(results.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn tool_use_ids_preserved_through_concurrent_execution() {
+        let results = run_concurrent_tools(
+            vec![
+                ("toolu_abc123".into(), "Read".into(), json!({})),
+                ("toolu_def456".into(), "Write".into(), json!({})),
+                ("toolu_ghi789".into(), "Bash".into(), json!({})),
+            ],
+            |name, _input| {
+                Box::pin(async move {
+                    // Add varying delays to shuffle completion order
+                    match name.as_str() {
+                        "Read" => tokio::time::sleep(Duration::from_millis(30)).await,
+                        "Write" => tokio::time::sleep(Duration::from_millis(10)).await,
+                        _ => tokio::time::sleep(Duration::from_millis(50)).await,
+                    }
+                    Some(ToolResult {
+                        content: format!("{} result", name),
+                        is_error: false,
+                        raw_content: None,
+                    })
+                })
+            },
+        )
+        .await;
+
+        assert_eq!(results.len(), 3);
+
+        // Regardless of completion order, IDs must match their tools
+        for (id, content, _) in &results {
+            match id.as_str() {
+                "toolu_abc123" => assert_eq!(content, "Read result"),
+                "toolu_def456" => assert_eq!(content, "Write result"),
+                "toolu_ghi789" => assert_eq!(content, "Bash result"),
+                other => panic!("unexpected tool_use_id: {}", other),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_execution_timing_is_parallel() {
+        // 5 tools each taking 50ms should complete in ~50ms total, not 250ms
+        let tools: Vec<_> = (0..5)
+            .map(|i| (format!("t{}", i), "Tool".into(), json!({})))
+            .collect();
+
+        let start = Instant::now();
+
+        let results = run_concurrent_tools(tools, |_name, _input| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                Some(ToolResult {
+                    content: "done".into(),
+                    is_error: false,
+                    raw_content: None,
+                })
+            })
+        })
+        .await;
+
+        let elapsed = start.elapsed();
+
+        assert_eq!(results.len(), 5);
+        // Should complete in roughly 50ms, definitely under 200ms
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "5 x 50ms tools took {:?} — should be ~50ms if concurrent",
+            elapsed
+        );
+    }
+
+    #[tokio::test]
+    async fn api_block_to_content_block_preserves_tool_result_fields() {
+        let block = ApiContentBlock::ToolResult {
+            tool_use_id: "toolu_abc".into(),
+            content: json!("result text"),
+            is_error: Some(true),
+            cache_control: None,
+        };
+
+        let content = api_block_to_content_block(&block);
+        match content {
+            ContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } => {
+                assert_eq!(tool_use_id, "toolu_abc");
+                assert_eq!(content, json!("result text"));
+                assert_eq!(is_error, Some(true));
+            }
+            _ => panic!("expected ToolResult content block"),
+        }
+    }
+
+    #[tokio::test]
+    async fn streamed_messages_each_contain_single_tool_result() {
+        // Verify that the streaming pattern produces one User message per tool result
+        let (tx, mut rx) = mpsc::unbounded_channel::<Result<Message>>();
+        let session_id = "test-session".to_string();
+
+        // Simulate what the production code does
+        let tool_ids = vec!["t1", "t2", "t3"];
+        for id in &tool_ids {
+            let api_block = ApiContentBlock::ToolResult {
+                tool_use_id: id.to_string(),
+                content: json!(format!("result for {}", id)),
+                is_error: None,
+                cache_control: None,
+            };
+
+            let result_msg = Message::User(UserMessage {
+                uuid: Some(Uuid::new_v4()),
+                session_id: session_id.clone(),
+                content: vec![api_block_to_content_block(&api_block)],
+                parent_tool_use_id: None,
+                is_synthetic: true,
+                tool_use_result: None,
+            });
+            tx.send(Ok(result_msg)).unwrap();
+        }
+        drop(tx);
+
+        let mut messages = Vec::new();
+        while let Some(Ok(msg)) = rx.recv().await {
+            messages.push(msg);
+        }
+
+        assert_eq!(messages.len(), 3, "should have 3 individual messages");
+
+        for (i, msg) in messages.iter().enumerate() {
+            if let Message::User(user) = msg {
+                assert_eq!(user.content.len(), 1, "each message should have exactly 1 content block");
+                assert!(user.is_synthetic);
+                if let ContentBlock::ToolResult { tool_use_id, .. } = &user.content[0] {
+                    assert_eq!(tool_use_id, tool_ids[i]);
+                } else {
+                    panic!("expected ToolResult block");
+                }
+            } else {
+                panic!("expected User message");
+            }
+        }
+    }
 }
