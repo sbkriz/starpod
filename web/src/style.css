@@ -213,6 +213,56 @@ html, body {
 .copy-btn:hover { color: var(--color-secondary); border-color: var(--color-dim); background: var(--color-elevated); }
 .copy-btn.copied { color: var(--color-ok) !important; border-color: var(--color-ok) !important; }
 
+/* ── Preview panel ── */
+#preview-panel {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-left: 1px solid transparent;
+  background: var(--color-surface);
+  flex-shrink: 0;
+}
+
+#preview-panel.open {
+  width: 50%;
+  min-width: 400px;
+  border-left-color: var(--color-border-subtle);
+}
+
+#preview-inner {
+  width: 50vw;
+  min-width: 400px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+#preview-panel.open #preview-inner {
+  opacity: 1;
+  transition-delay: 0.1s;
+}
+
+@media (max-width: 768px) {
+  #preview-panel.open {
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 100%;
+    min-width: 0;
+    z-index: 100;
+    box-shadow: -20px 0 60px rgba(0,0,0,0.5);
+  }
+  #preview-inner {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
 /* ── Session items ── */
 .session-item {
   transition: background 0.15s ease;

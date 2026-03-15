@@ -16,6 +16,13 @@ const newChatBtn = document.getElementById('new-chat-btn')
 const attachBtn = document.getElementById('attach-btn')
 const fileInput = document.getElementById('file-input')
 const attachmentPreview = document.getElementById('attachment-preview')
+const previewPanel = document.getElementById('preview-panel')
+const previewIframe = document.getElementById('preview-iframe')
+const previewUrl = document.getElementById('preview-url')
+const previewOpen = document.getElementById('preview-open')
+const previewClose = document.getElementById('preview-close')
+const previewFallback = document.getElementById('preview-fallback')
+const previewFallbackLink = document.getElementById('preview-fallback-link')
 
 // ── State ──
 let ws = null
@@ -69,9 +76,84 @@ function formatText(text) {
   html = html.replace(/`([^`]+)`/g, '<code class="bg-elevated border border-border-subtle px-1.5 py-0.5 rounded font-mono text-[12.5px] text-accent-soft">$1</code>')
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="text-primary font-semibold">$1</strong>')
   html = html.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>')
-  html = html.replace(/(?<![="'])(https?:\/\/[^\s<>"')\]]+)/g, '<a href="$1" target="_blank" rel="noopener" class="text-accent-soft underline decoration-accent/30 hover:decoration-accent transition-colors">$1</a>')
+  html = html.replace(/(?<![="'])(https?:\/\/[^\s<>"')\]]+)/g, '<a href="$1" target="_blank" rel="noopener" class="text-accent-soft underline decoration-accent/30 hover:decoration-accent transition-colors link-preview" data-url="$1">$1</a>')
   return html
 }
+
+function formatUserText(text) {
+  let html = escapeHtml(text)
+  html = html.replace(/(?<![="'])(https?:\/\/[^\s<>"')\]]+)/g, '<a href="$1" target="_blank" rel="noopener" class="text-white/80 underline decoration-white/30 hover:decoration-white/60 transition-colors link-preview" data-url="$1">$1</a>')
+  return html
+}
+
+// ── Link preview panel ──
+let previewLoadTimer = null
+
+function openPreview(url) {
+  previewUrl.textContent = url
+  previewOpen.href = url
+  previewFallbackLink.href = url
+  previewFallback.classList.add('hidden')
+  previewFallback.classList.remove('flex')
+  previewIframe.classList.remove('hidden')
+  previewIframe._loaded = false
+  previewIframe.src = url
+  previewPanel.classList.add('open')
+
+  // If iframe hasn't fired load after 5s, likely blocked
+  clearTimeout(previewLoadTimer)
+  previewLoadTimer = setTimeout(() => {
+    if (!previewIframe._loaded) showPreviewFallback()
+  }, 5000)
+}
+
+function closePreview() {
+  previewPanel.classList.remove('open')
+  clearTimeout(previewLoadTimer)
+  setTimeout(() => { previewIframe.src = 'about:blank' }, 300)
+}
+
+previewClose.addEventListener('click', closePreview)
+
+// Detect iframe load — fires for both success and X-Frame-Options blocks
+previewIframe.addEventListener('load', () => {
+  previewIframe._loaded = true
+  clearTimeout(previewLoadTimer)
+  try {
+    const doc = previewIframe.contentDocument || previewIframe.contentWindow.document
+    // Same-origin blank page = blocked by browser
+    if (doc && doc.body && doc.body.innerHTML === '') {
+      showPreviewFallback()
+    }
+  } catch {
+    // Cross-origin — loaded fine, we just can't inspect it
+  }
+})
+
+previewIframe.addEventListener('error', showPreviewFallback)
+
+function showPreviewFallback() {
+  previewIframe.classList.add('hidden')
+  previewFallback.classList.remove('hidden')
+  previewFallback.classList.add('flex')
+}
+
+// Intercept link clicks on the messages container
+document.getElementById('messages').addEventListener('click', (e) => {
+  const link = e.target.closest('.link-preview')
+  if (link) {
+    e.preventDefault()
+    openPreview(link.dataset.url)
+  }
+})
+
+// Close preview with Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && previewPanel.classList.contains('open')) {
+    e.preventDefault()
+    closePreview()
+  }
+})
 
 // ── Copy code ──
 window.copyCode = function(btn, id) {
@@ -153,7 +235,7 @@ function addUserMessage(text, atts) {
     }
     html += '</div>'
   }
-  if (text) html += '<div class="bg-accent text-white rounded-2xl rounded-br-md px-4 py-2.5 leading-relaxed text-sm whitespace-pre-wrap break-words">' + escapeHtml(text) + '</div>'
+  if (text) html += '<div class="bg-accent text-white rounded-2xl rounded-br-md px-4 py-2.5 leading-relaxed text-sm whitespace-pre-wrap break-words">' + formatUserText(text) + '</div>'
   msg.innerHTML = html
   messages.appendChild(msg)
   scrollToBottom()
@@ -595,7 +677,7 @@ function selectSession(session) {
           currentAssistantMsg = null
           const el = document.createElement('div')
           el.className = 'max-w-[80%] self-end mt-4'
-          el.innerHTML = '<div class="bg-accent text-white rounded-2xl rounded-br-md px-4 py-2.5 leading-relaxed text-sm whitespace-pre-wrap break-words">' + escapeHtml(m.content) + '</div>'
+          el.innerHTML = '<div class="bg-accent text-white rounded-2xl rounded-br-md px-4 py-2.5 leading-relaxed text-sm whitespace-pre-wrap break-words">' + formatUserText(m.content) + '</div>'
           messages.appendChild(el)
         } else if (m.role === 'assistant') {
           const el = document.createElement('div')
