@@ -71,7 +71,7 @@ impl StarpodAgent {
         })
     }
 
-    /// Path to the downloads directory (lives in the project root, not inside `.orion/`).
+    /// Path to the downloads directory (lives in the project root, not inside `.starpod/`).
     fn downloads_dir(&self) -> PathBuf {
         self.config.project_root.join("downloads")
     }
@@ -165,7 +165,16 @@ impl StarpodAgent {
              and scheduling tools (CronAdd, CronList, CronRemove, CronRuns).\n\
              You can read image files (png, jpg, gif, webp) with the Read tool — the image will be loaded \
              directly into the conversation so you can see and analyze it. For other file types like CSV or \
-             PDF, use Python via the Bash tool.",
+             PDF, use Python via the Bash tool.\n\n\
+             IMPORTANT — two separate domains of information:\n\
+             • Your personal knowledge, memory, soul, and user profile live inside `.starpod/data/` \
+             (SOUL.md, USER.md, MEMORY.md, memory/, knowledge/). Use MemorySearch to query this knowledge \
+             and MemoryWrite to persist new information there.\n\
+             • The user's project files (code, documents, data) live in the project root directory. \
+             Use Read, Glob, Grep, and Bash to explore and work with these files.\n\
+             Never confuse the two: `.starpod/` is YOUR persistent brain; the project root is the USER's workspace.\n\
+             You may ONLY access files within the project root and the `.starpod/` directory. \
+             Do not read, write, or execute anything outside these boundaries.",
         );
 
         // Inject agent personality
@@ -306,7 +315,11 @@ impl StarpodAgent {
             .external_tool_handler(self.build_tool_handler())
             .custom_tools(custom_tool_definitions())
             .attachments(query_atts)
-            .provider(provider);
+            .provider(provider)
+            .cwd(self.config.project_root.to_string_lossy().to_string())
+            .additional_directories(vec![
+                self.config.data_dir.to_string_lossy().to_string(),
+            ]);
 
         if let Some(ref cm) = self.config.compaction_model {
             builder = builder.compaction_model(cm);
@@ -461,7 +474,11 @@ impl StarpodAgent {
             .custom_tools(custom_tool_definitions())
             .followup_rx(followup_rx)
             .attachments(query_atts)
-            .provider(provider);
+            .provider(provider)
+            .cwd(self.config.project_root.to_string_lossy().to_string())
+            .additional_directories(vec![
+                self.config.data_dir.to_string_lossy().to_string(),
+            ]);
 
         if let Some(ref cm) = self.config.compaction_model {
             builder = builder.compaction_model(cm);

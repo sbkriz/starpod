@@ -54,12 +54,137 @@ impl ToolResult {
 pub struct ToolExecutor {
     /// Working directory for relative path resolution and command execution.
     cwd: PathBuf,
+    /// Optional path boundary. When `Some`, file-based tools (Read, Write,
+    /// Edit, Glob, Grep) will reject paths that fall outside the allowed
+    /// directories. This helps the model stay within the intended working
+    /// area — it is NOT an OS-level security sandbox (Bash is not restricted).
+    boundary: Option<PathBoundary>,
+}
+
+/// Guides file-based tools to stay within a set of allowed directory trees.
+///
+/// This is a model-assistance guardrail, not a security sandbox — the Bash
+/// tool is unrestricted and can access any path the process can reach.
+/// For true isolation, OS-level sandboxing (sandbox-exec, bwrap) is needed.
+///
+/// Boundary directories are canonicalized once at construction time so that
+/// every subsequent `check()` is a cheap prefix comparison.
+struct PathBoundary {
+    /// Canonicalized allowed directories (cwd + additional).
+    allowed: Vec<PathBuf>,
+}
+
+impl PathBoundary {
+    /// Build a sandbox from the cwd (always allowed) plus additional directories.
+    fn new(cwd: &Path, additional: &[PathBuf]) -> Self {
+        let mut allowed = Vec::with_capacity(1 + additional.len());
+
+        // Canonicalize once; if a directory doesn't exist yet we still keep
+        // the raw path so that the sandbox doesn't silently become empty.
+        let push_canon = |dirs: &mut Vec<PathBuf>, p: &Path| {
+            dirs.push(p.canonicalize().unwrap_or_else(|_| p.to_path_buf()));
+        };
+
+        push_canon(&mut allowed, cwd);
+        for dir in additional {
+            push_canon(&mut allowed, dir);
+        }
+
+        Self { allowed }
+    }
+
+    /// Check whether `path` falls inside any allowed directory.
+    ///
+    /// Strategy:
+    /// 1. Try `canonicalize()` on the full path (works for existing files/symlinks).
+    /// 2. If the file doesn't exist yet (Write/Edit), canonicalize the nearest
+    ///    existing ancestor and append the remaining components.
+    /// 3. If nothing on the path exists at all, **deny** — we refuse to guess.
+    fn check(&self, path: &Path) -> std::result::Result<(), ToolResult> {
+        let normalized = Self::normalize(path)?;
+
+        for allowed in &self.allowed {
+            if normalized.starts_with(allowed) {
+                return Ok(());
+            }
+        }
+
+        Err(ToolResult::err(format!(
+            "Access denied: {} is outside the allowed directories",
+            path.display()
+        )))
+    }
+
+    /// Produce a fully-resolved, `..`-free path without requiring every
+    /// component to exist on disk.
+    ///
+    /// Walks up the path until it finds an ancestor that *does* exist,
+    /// canonicalizes that part (resolving symlinks), then re-appends the
+    /// remaining normal components (rejecting any leftover `..`).
+    fn normalize(path: &Path) -> std::result::Result<PathBuf, ToolResult> {
+        // Fast path: the full path already exists.
+        if let Ok(canon) = path.canonicalize() {
+            return Ok(canon);
+        }
+
+        // Walk up to find the deepest existing ancestor.
+        let mut remaining = Vec::new();
+        let mut ancestor = path.to_path_buf();
+
+        loop {
+            if ancestor.exists() {
+                let base = ancestor.canonicalize().map_err(|_| {
+                    ToolResult::err(format!(
+                        "Access denied: cannot resolve {}",
+                        path.display()
+                    ))
+                })?;
+
+                // Re-append remaining components — only Normal segments allowed.
+                let mut result = base;
+                for component in remaining.iter().rev() {
+                    result = result.join(component);
+                }
+                return Ok(result);
+            }
+
+            match ancestor.file_name() {
+                Some(name) => {
+                    let name = name.to_os_string();
+                    remaining.push(name);
+                    if !ancestor.pop() {
+                        break;
+                    }
+                }
+                None => break,
+            }
+        }
+
+        // Nothing on the path exists — deny.
+        Err(ToolResult::err(format!(
+            "Access denied: cannot resolve {}",
+            path.display()
+        )))
+    }
 }
 
 impl ToolExecutor {
-    /// Create a new executor rooted at the given working directory.
+    /// Create a new executor rooted at the given working directory (no path boundary).
     pub fn new(cwd: PathBuf) -> Self {
-        Self { cwd }
+        Self {
+            cwd,
+            boundary: None,
+        }
+    }
+
+    /// Create a new executor with a path boundary.
+    /// File-based tools will only operate within `cwd` and the `additional` directories.
+    pub fn with_allowed_dirs(cwd: PathBuf, additional: Vec<PathBuf>) -> Self {
+        let boundary = PathBoundary::new(&cwd, &additional);
+        Self {
+            cwd,
+            boundary: Some(boundary),
+        }
     }
 
     /// Dispatch a tool call by name, deserializing `input` into the appropriate typed input.
@@ -99,14 +224,21 @@ impl ToolExecutor {
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
-    /// Resolve a path that may be relative against the executor's cwd.
-    fn resolve_path(&self, path: &str) -> PathBuf {
+    /// Resolve a path (relative → absolute) and validate it against the boundary.
+    /// Returns the resolved `PathBuf` or an access-denied `ToolResult`.
+    fn resolve_and_check(&self, path: &str) -> std::result::Result<PathBuf, ToolResult> {
         let p = Path::new(path);
-        if p.is_absolute() {
+        let resolved = if p.is_absolute() {
             p.to_path_buf()
         } else {
             self.cwd.join(p)
+        };
+
+        if let Some(ref boundary) = self.boundary {
+            boundary.check(&resolved)?;
         }
+
+        Ok(resolved)
     }
 
     // ── Read ────────────────────────────────────────────────────────────
@@ -116,7 +248,10 @@ impl ToolExecutor {
     /// Image files (png, jpg, gif, webp) are returned as base64 image content
     /// blocks so the model can see them directly.
     async fn execute_read(&self, input: &FileReadInput) -> Result<ToolResult> {
-        let path = self.resolve_path(&input.file_path);
+        let path = match self.resolve_and_check(&input.file_path) {
+            Ok(p) => p,
+            Err(denied) => return Ok(denied),
+        };
 
         // Check if the file is an image by extension.
         let ext = path
@@ -215,7 +350,10 @@ impl ToolExecutor {
 
     /// Write content to a file, creating parent directories as needed.
     async fn execute_write(&self, input: &FileWriteInput) -> Result<ToolResult> {
-        let path = self.resolve_path(&input.file_path);
+        let path = match self.resolve_and_check(&input.file_path) {
+            Ok(p) => p,
+            Err(denied) => return Ok(denied),
+        };
 
         // Ensure parent directories exist.
         if let Some(parent) = path.parent() {
@@ -247,7 +385,10 @@ impl ToolExecutor {
     /// - If `old_string` appears more than once and `replace_all` is not set, returns an error
     ///   asking for more context to make the match unique.
     async fn execute_edit(&self, input: &FileEditInput) -> Result<ToolResult> {
-        let path = self.resolve_path(&input.file_path);
+        let path = match self.resolve_and_check(&input.file_path) {
+            Ok(p) => p,
+            Err(denied) => return Ok(denied),
+        };
 
         let content = match tokio::fs::read_to_string(&path).await {
             Ok(c) => c,
@@ -412,7 +553,10 @@ impl ToolExecutor {
     /// Find files matching a glob pattern. Searches from the provided `path` or the cwd.
     async fn execute_glob(&self, input: &GlobInput) -> Result<ToolResult> {
         let base = match &input.path {
-            Some(p) => self.resolve_path(p),
+            Some(p) => match self.resolve_and_check(p) {
+                Ok(resolved) => resolved,
+                Err(denied) => return Ok(denied),
+            },
             None => self.cwd.clone(),
         };
 
@@ -455,6 +599,12 @@ impl ToolExecutor {
     /// Search file contents using regex, with support for multiple output modes,
     /// context lines, case insensitivity, line numbers, head limit, and offset.
     async fn execute_grep(&self, input: &GrepInput) -> Result<ToolResult> {
+        if let Some(ref p) = input.path {
+            if let Err(denied) = self.resolve_and_check(p) {
+                return Ok(denied);
+            }
+        }
+
         let input = input.clone();
         let cwd = self.cwd.clone();
 
@@ -975,5 +1125,174 @@ mod tests {
         let r = ToolResult::err("boom".into());
         assert!(r.is_error);
         assert!(r.raw_content.is_none());
+    }
+
+    // ── Path sandboxing ────────────────────────────────────────────────
+
+    fn setup_sandboxed() -> (TempDir, TempDir, ToolExecutor) {
+        let project = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        let executor = ToolExecutor::with_allowed_dirs(
+            project.path().to_path_buf(),
+            vec![data.path().to_path_buf()],
+        );
+        (project, data, executor)
+    }
+
+    #[tokio::test]
+    async fn sandbox_allows_read_inside_cwd() {
+        let (project, _data, executor) = setup_sandboxed();
+        let file = project.path().join("hello.txt");
+        std::fs::write(&file, "ok").unwrap();
+
+        let result = executor
+            .execute("Read", json!({ "file_path": file.to_str().unwrap() }))
+            .await
+            .unwrap();
+        assert!(!result.is_error);
+    }
+
+    #[tokio::test]
+    async fn sandbox_allows_read_inside_additional_dir() {
+        let (_project, data, executor) = setup_sandboxed();
+        let file = data.path().join("MEMORY.md");
+        std::fs::write(&file, "# Memory").unwrap();
+
+        let result = executor
+            .execute("Read", json!({ "file_path": file.to_str().unwrap() }))
+            .await
+            .unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("Memory"));
+    }
+
+    #[tokio::test]
+    async fn sandbox_denies_read_outside_boundaries() {
+        let (_project, _data, executor) = setup_sandboxed();
+        let outside = TempDir::new().unwrap();
+        let file = outside.path().join("secret.txt");
+        std::fs::write(&file, "secret data").unwrap();
+
+        let result = executor
+            .execute("Read", json!({ "file_path": file.to_str().unwrap() }))
+            .await
+            .unwrap();
+        assert!(result.is_error);
+        assert!(result.content.contains("Access denied"));
+    }
+
+    #[tokio::test]
+    async fn sandbox_denies_write_outside_boundaries() {
+        let (_project, _data, executor) = setup_sandboxed();
+        let outside = TempDir::new().unwrap();
+        let file = outside.path().join("hack.txt");
+
+        let result = executor
+            .execute(
+                "Write",
+                json!({ "file_path": file.to_str().unwrap(), "content": "pwned" }),
+            )
+            .await
+            .unwrap();
+        assert!(result.is_error);
+        assert!(result.content.contains("Access denied"));
+        assert!(!file.exists());
+    }
+
+    #[tokio::test]
+    async fn sandbox_denies_edit_outside_boundaries() {
+        let (_project, _data, executor) = setup_sandboxed();
+        let outside = TempDir::new().unwrap();
+        let file = outside.path().join("target.txt");
+        std::fs::write(&file, "original").unwrap();
+
+        let result = executor
+            .execute(
+                "Edit",
+                json!({
+                    "file_path": file.to_str().unwrap(),
+                    "old_string": "original",
+                    "new_string": "modified"
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(result.is_error);
+        assert!(result.content.contains("Access denied"));
+    }
+
+    #[tokio::test]
+    async fn no_sandbox_when_allowed_dirs_empty() {
+        // Default executor (no allowed_dirs) should not restrict paths.
+        let outside = TempDir::new().unwrap();
+        let file = outside.path().join("free.txt");
+        std::fs::write(&file, "open access").unwrap();
+
+        let executor = ToolExecutor::new(TempDir::new().unwrap().path().to_path_buf());
+        let result = executor
+            .execute("Read", json!({ "file_path": file.to_str().unwrap() }))
+            .await
+            .unwrap();
+        assert!(!result.is_error);
+    }
+
+    #[tokio::test]
+    async fn sandbox_denies_dotdot_traversal() {
+        let (project, _data, executor) = setup_sandboxed();
+        // Create a file outside via ../ traversal
+        let outside = TempDir::new().unwrap();
+        let secret = outside.path().join("secret.txt");
+        std::fs::write(&secret, "sensitive").unwrap();
+
+        // Try to read via a ../../../ path rooted inside the project
+        let traversal = project
+            .path()
+            .join("..")
+            .join("..")
+            .join(outside.path().strip_prefix("/").unwrap())
+            .join("secret.txt");
+
+        let result = executor
+            .execute("Read", json!({ "file_path": traversal.to_str().unwrap() }))
+            .await
+            .unwrap();
+        assert!(result.is_error);
+        assert!(result.content.contains("Access denied"));
+    }
+
+    #[tokio::test]
+    async fn sandbox_allows_write_new_file_inside_cwd() {
+        let (project, _data, executor) = setup_sandboxed();
+        let file = project.path().join("subdir").join("new.txt");
+
+        let result = executor
+            .execute(
+                "Write",
+                json!({ "file_path": file.to_str().unwrap(), "content": "hello" }),
+            )
+            .await
+            .unwrap();
+        assert!(!result.is_error);
+        assert!(file.exists());
+    }
+
+    #[tokio::test]
+    async fn sandbox_denies_symlink_escape() {
+        let (project, _data, executor) = setup_sandboxed();
+        let outside = TempDir::new().unwrap();
+        let secret = outside.path().join("secret.txt");
+        std::fs::write(&secret, "sensitive").unwrap();
+
+        // Create a symlink inside project pointing outside
+        let link = project.path().join("escape");
+        std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+
+        let via_link = link.join("secret.txt");
+        let result = executor
+            .execute("Read", json!({ "file_path": via_link.to_str().unwrap() }))
+            .await
+            .unwrap();
+        assert!(result.is_error);
+        assert!(result.content.contains("Access denied"));
     }
 }

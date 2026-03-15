@@ -42,7 +42,7 @@
 
 ### Infrastructure
 - [x] **Hooks crate** — Extract hook logic from agent-sdk into a standalone `starpod-hooks` crate so Starpod can define its own lifecycle hooks independently of the SDK
-- [ ] **Sandboxed execution** — Docker / Apple Container sandboxing for command execution
+- [ ] **Sandboxed execution** — OS-level sandboxing for Bash tool (`sandbox-exec` on macOS, `bwrap`/`firejail` on Linux) to enforce file-system boundaries at the kernel level. Currently the path boundary in `ToolExecutor` only guards Read/Write/Edit/Glob/Grep; Bash can still access anything via shell commands.
 - [ ] **Metrics & tracing** — Prometheus metrics, OpenTelemetry tracing for observability
 - [ ] **Rate limiting & auth** — Per-IP throttling, proper login/session auth beyond optional API key
 - [ ] **Multi-channel access** — Discord, Slack, WhatsApp integrations alongside existing HTTP/WS + CLI + Telegram. Channel enum and session routing infrastructure is in place — add new `Channel` variants.

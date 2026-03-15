@@ -285,8 +285,17 @@ async fn run_agent_loop(
         None => Box::new(AnthropicProvider::from_env()?),
     };
 
-    // Initialize tool executor
-    let tool_executor = ToolExecutor::new(PathBuf::from(&cwd));
+    // Initialize tool executor with optional path boundary
+    let additional_dirs: Vec<PathBuf> = options
+        .additional_directories
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+    let tool_executor = if additional_dirs.is_empty() {
+        ToolExecutor::new(PathBuf::from(&cwd))
+    } else {
+        ToolExecutor::with_allowed_dirs(PathBuf::from(&cwd), additional_dirs)
+    };
 
     // Build hook registry from options
     let hook_registry = HookRegistry::from_map(std::mem::take(&mut options.hooks));

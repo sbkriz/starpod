@@ -393,6 +393,11 @@ impl OptionsBuilder {
         self
     }
 
+    pub fn additional_directories(mut self, dirs: Vec<String>) -> Self {
+        self.options.additional_directories = dirs;
+        self
+    }
+
     pub fn model(mut self, model: impl Into<String>) -> Self {
         self.options.model = Some(model.into());
         self
