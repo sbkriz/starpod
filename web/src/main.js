@@ -1,6 +1,16 @@
 import './style.css'
 import { marked } from 'marked'
 
+// Fallback for crypto.randomUUID (unavailable over plain HTTP)
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID()
+  }
+  return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c =>
+    (+c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> +c / 4).toString(16)
+  )
+}
+
 // Configure marked for GFM (tables, strikethrough, etc.)
 marked.setOptions({
   gfm: true,
@@ -66,7 +76,7 @@ let currentBubble = null
 let reconnectAttempt = 0
 let toolCounter = 0
 let currentSessionId = null
-let currentSessionKey = crypto.randomUUID()
+let currentSessionKey = generateUUID()
 let pendingAttachments = []
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
@@ -641,7 +651,7 @@ const welcomeHTML =
 
 function newChat() {
   currentSessionId = null
-  currentSessionKey = crypto.randomUUID()
+  currentSessionKey = generateUUID()
   messages.innerHTML = welcomeHTML
   closeSidebar()
   inputText.focus()
@@ -719,7 +729,7 @@ function renderSessions(sessions) {
 function selectSession(session) {
   if (sidebar.classList.contains('transient')) closeSidebar()
   currentSessionId = session.id
-  currentSessionKey = session.channel_session_key || crypto.randomUUID()
+  currentSessionKey = session.channel_session_key || generateUUID()
   // Update active state in sidebar
   sessionList.querySelectorAll('.session-item').forEach(el => {
     el.classList.toggle('active', el._sessionId === session.id)
