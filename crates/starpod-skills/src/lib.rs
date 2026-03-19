@@ -582,6 +582,25 @@ mod tests {
         assert_eq!(body.trim(), "Instructions here.");
     }
 
+    #[test]
+    fn test_format_then_parse_roundtrip_no_version() {
+        let formatted = format_skill_md("noversion", "No version.", None, "Content.");
+        let (fm, body) = parse_skill_md(&formatted);
+        let fm = fm.unwrap();
+        assert_eq!(fm.name, "noversion");
+        assert!(fm.version.is_none());
+        assert_eq!(body.trim(), "Content.");
+    }
+
+    #[test]
+    fn test_format_skill_md_empty_body() {
+        let result = format_skill_md("stub", "Stub.", Some("0.1.0"), "");
+        assert!(result.contains("name: stub"));
+        assert!(result.contains("version: 0.1.0"));
+        // Should end with the frontmatter closing + two newlines
+        assert!(result.ends_with("---\n\n"));
+    }
+
     // ── CRUD operations ────────────────────────────────────────────────────
 
     #[test]
@@ -673,6 +692,96 @@ mod tests {
 
         let raw = std::fs::read_to_string(tmp.path().join("no-ver").join("SKILL.md")).unwrap();
         assert!(!raw.contains("version:"));
+    }
+
+    #[test]
+    fn test_update_with_version() {
+        let tmp = TempDir::new().unwrap();
+        let store = SkillStore::new(tmp.path()).unwrap();
+
+        store.create("my-skill", "v1", Some("0.1.0"), "body v1").unwrap();
+        store.update("my-skill", "v2", Some("0.2.0"), "body v2").unwrap();
+
+        let skill = store.get("my-skill").unwrap().unwrap();
+        assert_eq!(skill.version.as_deref(), Some("0.2.0"));
+        assert_eq!(skill.description, "v2");
+        assert_eq!(skill.body.trim(), "body v2");
+    }
+
+    #[test]
+    fn test_update_removes_version_when_none() {
+        let tmp = TempDir::new().unwrap();
+        let store = SkillStore::new(tmp.path()).unwrap();
+
+        store.create("my-skill", "d", Some("1.0.0"), "body").unwrap();
+        assert_eq!(store.get("my-skill").unwrap().unwrap().version.as_deref(), Some("1.0.0"));
+
+        store.update("my-skill", "d", None, "body").unwrap();
+        assert!(store.get("my-skill").unwrap().unwrap().version.is_none());
+    }
+
+    #[test]
+    fn test_version_none_for_old_files_without_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        let store = SkillStore::new(tmp.path()).unwrap();
+
+        // Manually create old-format skill (no frontmatter)
+        let skill_dir = tmp.path().join("legacy");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "Just instructions.").unwrap();
+
+        let skill = store.get("legacy").unwrap().unwrap();
+        assert!(skill.version.is_none());
+    }
+
+    #[test]
+    fn test_version_none_for_frontmatter_without_version() {
+        let tmp = TempDir::new().unwrap();
+        let store = SkillStore::new(tmp.path()).unwrap();
+
+        // Manually create skill with frontmatter but no version field
+        let skill_dir = tmp.path().join("no-ver-fm");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: no-ver-fm\ndescription: No version in frontmatter.\n---\n\nBody here.",
+        ).unwrap();
+
+        let skill = store.get("no-ver-fm").unwrap().unwrap();
+        assert!(skill.version.is_none());
+        assert_eq!(skill.description, "No version in frontmatter.");
+    }
+
+    #[test]
+    fn test_version_parsed_from_handwritten_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        let store = SkillStore::new(tmp.path()).unwrap();
+
+        // Manually create skill with version in frontmatter
+        let skill_dir = tmp.path().join("hand");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: hand\ndescription: Handwritten.\nversion: 2.5.1\n---\n\nManual body.",
+        ).unwrap();
+
+        let skill = store.get("hand").unwrap().unwrap();
+        assert_eq!(skill.version.as_deref(), Some("2.5.1"));
+    }
+
+    #[test]
+    fn test_create_with_empty_body() {
+        // Simulates fallback case where LLM fails and we create with empty body
+        let tmp = TempDir::new().unwrap();
+        let store = SkillStore::new(tmp.path()).unwrap();
+
+        store.create("stub", "A stub skill.", Some("0.1.0"), "").unwrap();
+
+        let skill = store.get("stub").unwrap().unwrap();
+        assert_eq!(skill.name, "stub");
+        assert_eq!(skill.description, "A stub skill.");
+        assert_eq!(skill.version.as_deref(), Some("0.1.0"));
+        assert!(skill.body.trim().is_empty());
     }
 
     #[test]

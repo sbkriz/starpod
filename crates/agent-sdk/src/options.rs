@@ -709,6 +709,19 @@ mod tests {
     }
 
     #[test]
+    fn builder_output_format_with_other_options() {
+        let schema = serde_json::json!({"type": "object"});
+        let opts = Options::builder()
+            .output_format(schema.clone())
+            .max_turns(1)
+            .model("claude-haiku-4-5")
+            .build();
+        assert_eq!(opts.output_format, Some(schema));
+        assert_eq!(opts.max_turns, Some(1));
+        assert_eq!(opts.model.as_deref(), Some("claude-haiku-4-5"));
+    }
+
+    #[test]
     fn builder_pre_compact_handler_default_is_none() {
         let opts = Options::builder().build();
         assert!(opts.pre_compact_handler.is_none());

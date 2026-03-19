@@ -2236,4 +2236,50 @@ mod tests {
         assert!(result.ends_with('}'));
         let _: serde_json::Value = serde_json::from_str(result).unwrap();
     }
+
+    #[test]
+    fn strip_json_fence_empty_string() {
+        assert_eq!(strip_json_fence(""), "");
+    }
+
+    #[test]
+    fn strip_json_fence_only_fences() {
+        // Just fences with no content between them
+        assert_eq!(strip_json_fence("```json\n```"), "");
+    }
+
+    #[test]
+    fn strip_json_fence_bare_fences_only() {
+        assert_eq!(strip_json_fence("```\n```"), "");
+    }
+
+    #[test]
+    fn strip_json_fence_preserves_inner_backticks() {
+        // JSON containing backtick strings shouldn't be corrupted
+        let input = r#"{"body": "Use `code` here"}"#;
+        assert_eq!(strip_json_fence(input), input);
+    }
+
+    #[test]
+    fn strip_json_fence_with_trailing_newline_after_fence() {
+        let input = "```json\n{\"a\": 1}\n```\n";
+        assert_eq!(strip_json_fence(input), r#"{"a": 1}"#);
+    }
+
+    #[test]
+    fn strip_json_fence_does_not_strip_partial_fence() {
+        // Single backticks are not a fence
+        let input = "`{\"a\": 1}`";
+        assert_eq!(strip_json_fence(input), input);
+    }
+
+    #[test]
+    fn strip_json_fence_idempotent() {
+        let input = r#"{"a": 1}"#;
+        assert_eq!(strip_json_fence(strip_json_fence(input)), input);
+
+        let fenced = "```json\n{\"a\": 1}\n```";
+        let once = strip_json_fence(fenced);
+        assert_eq!(strip_json_fence(once), once);
+    }
 }
