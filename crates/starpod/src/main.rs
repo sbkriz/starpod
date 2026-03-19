@@ -1314,24 +1314,30 @@ async fn main() -> anyhow::Result<()> {
         Commands::Skill { agent: agent_name, action } => {
             // Resolve skills directory: use agent's instance skills if --agent given,
             // otherwise detect mode and use resolved skills_dir.
+            // Also load .env so provider API keys are available for `skill new`.
             let cwd = std::env::current_dir()?;
             let skills_dir = if let Some(ref name) = agent_name {
                 // Workspace mode: resolve to instance skills
                 let mode = starpod_core::detect_mode_from(Some(name), &cwd)?;
                 let paths = starpod_core::ResolvedPaths::resolve(&mode)?;
+                let _ = starpod_core::load_agent_config(&paths);
                 paths.skills_dir
             } else {
                 // Try to detect mode automatically
                 match starpod_core::detect_mode(None) {
                     Ok(mode) => {
                         let paths = starpod_core::ResolvedPaths::resolve(&mode)?;
+                        let _ = starpod_core::load_agent_config(&paths);
                         paths.skills_dir
                     }
                     Err(_) => {
                         // Fallback: workspace skills/ or .starpod/skills/
+                        // Also load .env so provider API keys are available for `skill new`
                         if cwd.join("starpod.toml").is_file() {
+                            starpod_core::load_env(&cwd, None);
                             cwd.join("skills")
                         } else if cwd.join(".starpod").is_dir() {
+                            starpod_core::load_env(&cwd.join(".starpod"), None);
                             cwd.join(".starpod").join("skills")
                         } else {
                             cwd.join("skills")
@@ -1398,13 +1404,6 @@ async fn main() -> anyhow::Result<()> {
                             if p.is_empty() { None } else { Some(p) }
                         }
                     };
-
-                    // Load .env so ANTHROPIC_API_KEY (and other provider keys) are available
-                    if let Ok(mode) = starpod_core::detect_mode(agent_name.as_deref()) {
-                        if let Ok(paths) = starpod_core::ResolvedPaths::resolve(&mode) {
-                            let _ = starpod_core::load_agent_config(&paths);
-                        }
-                    }
 
                     println!(
                         "  {} Generating skill '{}'...\n",
