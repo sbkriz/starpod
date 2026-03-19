@@ -4072,6 +4072,7 @@ name = "starpod-core"
 version = "0.1.0"
 dependencies = [
  "dotenvy",
+ "iana-time-zone",
  "serde",
  "serde_json",
  "tempfile",

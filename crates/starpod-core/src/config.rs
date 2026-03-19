@@ -550,6 +550,13 @@ impl Default for StarpodConfig {
 }
 
 impl StarpodConfig {
+    /// Resolved timezone: config value → system timezone fallback.
+    pub fn resolved_timezone(&self) -> Option<String> {
+        self.timezone
+            .clone()
+            .or_else(|| iana_time_zone::get_timezone().ok())
+    }
+
     /// Resolved Anthropic API key from the `ANTHROPIC_API_KEY` env var.
     pub fn resolved_api_key(&self) -> Option<String> {
         std::env::var("ANTHROPIC_API_KEY").ok()

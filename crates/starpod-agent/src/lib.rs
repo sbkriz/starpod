@@ -446,7 +446,7 @@ impl StarpodAgent {
             memory: Arc::clone(&self.memory),
             skills: Arc::clone(&self.skills),
             cron: Arc::clone(&self.cron),
-            user_tz: config.timezone.clone(),
+            user_tz: config.resolved_timezone(),
             instance_root: self.paths.instance_root.clone(),
             user_id: user_id.map(|s| s.to_string()),
         });
@@ -934,7 +934,7 @@ impl StarpodAgent {
         });
 
         let config = self.snapshot_config();
-        let user_tz = config.timezone.clone();
+        let user_tz = config.resolved_timezone();
         let mut scheduler = starpod_cron::CronScheduler::new(cron_store, executor, 30, user_tz)
             .with_max_concurrent_runs(config.cron.max_concurrent_runs as u32);
         if let Some(n) = notifier {
@@ -1031,7 +1031,8 @@ async fn ensure_heartbeat(
         expr: "0 */30 * * * *".to_string(),
     };
     let config = agent.config();
-    let user_tz = config.timezone.as_deref();
+    let resolved_tz = config.resolved_timezone();
+    let user_tz = resolved_tz.as_deref();
     store
         .add_job_full(
             "__heartbeat__",
