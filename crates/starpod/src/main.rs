@@ -1,3 +1,4 @@
+mod auth;
 mod onboarding;
 
 use std::sync::Arc;
@@ -131,6 +132,12 @@ enum Commands {
         force: bool,
     },
 
+    /// Authenticate with the Spawner backend.
+    Auth {
+        #[command(subcommand)]
+        action: AuthCommand,
+    },
+
     /// Deploy stub (future).
     Deploy {
         /// Agent name from agents/ directory.
@@ -223,6 +230,22 @@ enum InstanceCommand {
         /// Instance ID.
         id: String,
     },
+}
+
+// ── Auth subcommands ───────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+enum AuthCommand {
+    /// Log in via the Spawner web UI (opens browser).
+    Login {
+        /// Spawner URL (env: STARPOD_URL).
+        #[arg(long)]
+        url: Option<String>,
+    },
+    /// Remove saved credentials.
+    Logout,
+    /// Show current authentication status.
+    Status,
 }
 
 // ── Utility subcommands ────────────────────────────────────────────────────
@@ -1653,9 +1676,96 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
+        // ── Auth commands ─────────────────────────────────────────────
+        Commands::Auth { action } => {
+            match action {
+                AuthCommand::Login { url } => {
+                    let spawner_url = url
+                        .or_else(|| std::env::var(auth::SPAWNER_URL_ENV).ok())
+                        .unwrap_or_else(|| auth::DEFAULT_SPAWNER_URL.to_string());
+
+                    if let Some(existing) = auth::load_credentials() {
+                        println!(
+                            "  {} Already logged in as {}",
+                            "ℹ".bright_cyan(),
+                            existing.email.bright_white()
+                        );
+                        println!(
+                            "  {} Run {} to log out first.",
+                            "→".dimmed(),
+                            "starpod auth logout".bright_white()
+                        );
+                        return Ok(());
+                    }
+
+                    match auth::browser_login(&spawner_url).await {
+                        Ok(creds) => {
+                            println!();
+                            println!(
+                                "  {} Authenticated as {}",
+                                "✓".green().bold(),
+                                creds.email.bright_white()
+                            );
+                            println!(
+                                "  {} Credentials saved to {}",
+                                "→".dimmed(),
+                                "~/.starpod/credentials.toml".bright_white()
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("  {} Login failed: {}", "✗".red().bold(), e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+
+                AuthCommand::Logout => {
+                    match auth::delete_credentials() {
+                        Ok(()) => {
+                            println!(
+                                "  {} Logged out. Credentials removed.",
+                                "✓".green().bold()
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("  {} {}", "✗".red().bold(), e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+
+                AuthCommand::Status => {
+                    match auth::load_credentials() {
+                        Some(creds) => {
+                            println!("  {} Logged in", "✓".green().bold());
+                            println!("  {} Email:   {}", "│".dimmed(), creds.email.bright_white());
+                            println!("  {} Backend: {}", "│".dimmed(), creds.backend_url);
+                            let preview = if creds.api_key.len() > 12 {
+                                format!("{}...{}", &creds.api_key[..8], &creds.api_key[creds.api_key.len()-4..])
+                            } else {
+                                "****".to_string()
+                            };
+                            println!("  {} API Key: {}", "│".dimmed(), preview);
+                        }
+                        None => {
+                            println!("  {} Not logged in", "✗".yellow().bold());
+                            println!(
+                                "  {} Run {} to authenticate.",
+                                "→".dimmed(),
+                                "starpod auth login".bright_white()
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         // ── Instance commands ──────────────────────────────────────────
         Commands::Instance { action } => {
-            let backend_url = std::env::var("STARPOD_INSTANCE_BACKEND_URL").ok();
+            let saved = auth::load_credentials();
+            let backend_url = std::env::var("STARPOD_INSTANCE_BACKEND_URL")
+                .ok()
+                .or_else(|| saved.as_ref().map(|c| c.backend_url.clone()));
 
             let Some(backend_url) = backend_url else {
                 eprintln!(
@@ -1663,14 +1773,17 @@ async fn main() -> anyhow::Result<()> {
                     "✗".red().bold()
                 );
                 eprintln!(
-                    "  {} Set env var {}.",
+                    "  {} Run {} or set env var {}.",
                     "→".dimmed(),
+                    "starpod auth login".bright_white(),
                     "STARPOD_INSTANCE_BACKEND_URL".bright_white()
                 );
                 std::process::exit(1);
             };
 
-            let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
+            let api_key = std::env::var("ANTHROPIC_API_KEY")
+                .ok()
+                .or_else(|| saved.as_ref().map(|c| c.api_key.clone()));
             let client = InstanceClient::new_with_timeout(&backend_url, api_key, 30)?;
 
             match action {
@@ -1927,30 +2040,37 @@ async fn main() -> anyhow::Result<()> {
             no_instance,
             env_file,
         } => {
-            // Require backend URL and API key
-            let backend_url = std::env::var("STARPOD_INSTANCE_BACKEND_URL").ok();
+            // Require backend URL and API key (env vars > saved credentials)
+            let saved = auth::load_credentials();
+            let backend_url = std::env::var("STARPOD_INSTANCE_BACKEND_URL")
+                .ok()
+                .or_else(|| saved.as_ref().map(|c| c.backend_url.clone()));
             let Some(backend_url) = backend_url else {
                 eprintln!(
                     "  {} Deploy backend not configured.",
                     "✗".red().bold()
                 );
                 eprintln!(
-                    "  {} Set env var {}.",
+                    "  {} Run {} or set env var {}.",
                     "→".dimmed(),
+                    "starpod auth login".bright_white(),
                     "STARPOD_INSTANCE_BACKEND_URL".bright_white()
                 );
                 std::process::exit(1);
             };
 
-            let api_key = std::env::var("STARPOD_API_KEY").ok();
+            let api_key = std::env::var("STARPOD_API_KEY")
+                .ok()
+                .or_else(|| saved.as_ref().map(|c| c.api_key.clone()));
             let Some(api_key) = api_key else {
                 eprintln!(
                     "  {} Authentication required.",
                     "✗".red().bold()
                 );
                 eprintln!(
-                    "  {} Set env var {}.",
+                    "  {} Run {} or set env var {}.",
                     "→".dimmed(),
+                    "starpod auth login".bright_white(),
                     "STARPOD_API_KEY".bright_white()
                 );
                 std::process::exit(1);
