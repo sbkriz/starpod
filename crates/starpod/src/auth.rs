@@ -28,15 +28,6 @@ pub struct CallbackPayload {
     pub state: String,
 }
 
-/// Resolve the Spawner URL from: env var > saved credentials > default.
-pub fn resolve_spawner_url() -> String {
-    std::env::var(SPAWNER_URL_ENV).unwrap_or_else(|_| {
-        load_credentials()
-            .map(|c| c.backend_url)
-            .unwrap_or_else(|| DEFAULT_SPAWNER_URL.to_string())
-    })
-}
-
 /// Get the credentials file path: ~/.starpod/credentials.toml
 pub fn credentials_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".starpod").join("credentials.toml"))

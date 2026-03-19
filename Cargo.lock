@@ -4027,6 +4027,7 @@ dependencies = [
  "clap",
  "colored",
  "dialoguer",
+ "dirs",
  "futures",
  "rustyline",
  "serde",
