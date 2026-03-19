@@ -1466,8 +1466,8 @@ async fn main() -> anyhow::Result<()> {
                         );
                     }
 
-                    let structured = result.structured_output.ok_or_else(|| {
-                        anyhow::anyhow!("No structured output returned from AI")
+                    let result_text = result.result.ok_or_else(|| {
+                        anyhow::anyhow!("No text returned from AI")
                     })?;
 
                     #[derive(serde::Deserialize)]
@@ -1476,7 +1476,19 @@ async fn main() -> anyhow::Result<()> {
                         body: String,
                     }
 
-                    let gen: SkillGen = serde_json::from_value(structured)?;
+                    // The model returns JSON (possibly wrapped in a ```json fence).
+                    let json_str = result_text.trim();
+                    let json_str = json_str
+                        .strip_prefix("```json")
+                        .or_else(|| json_str.strip_prefix("```"))
+                        .unwrap_or(json_str);
+                    let json_str = json_str
+                        .strip_suffix("```")
+                        .unwrap_or(json_str)
+                        .trim();
+
+                    let gen: SkillGen = serde_json::from_str(json_str)
+                        .map_err(|e| anyhow::anyhow!("Failed to parse AI response as JSON: {e}"))?;
 
                     let skill_desc = description.unwrap_or(gen.description);
 

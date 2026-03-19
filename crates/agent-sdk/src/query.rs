@@ -192,8 +192,11 @@ async fn run_agent_loop(
         .clone()
         .unwrap_or_else(|| DEFAULT_MODEL.to_string());
 
-    // Build tool definitions
-    let tool_names: Vec<String> = if options.allowed_tools.is_empty() {
+    // Build tool definitions (skip tools entirely when output_format is set —
+    // structured-output queries should not use tools).
+    let tool_names: Vec<String> = if options.output_format.is_some() {
+        Vec::new()
+    } else if options.allowed_tools.is_empty() {
         // Default set of tools
         vec![
             "Read".into(), "Write".into(), "Edit".into(), "Bash".into(),
