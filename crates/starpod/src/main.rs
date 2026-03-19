@@ -357,6 +357,17 @@ Return a JSON object with exactly: `name`, `description`, `body`.
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+/// Strip optional markdown code fences from an AI response that should contain
+/// raw JSON.  Handles ` ```json ... ``` `, bare ` ``` ... ``` `, and plain JSON.
+fn strip_json_fence(raw: &str) -> &str {
+    let s = raw.trim();
+    let s = s
+        .strip_prefix("```json")
+        .or_else(|| s.strip_prefix("```"))
+        .unwrap_or(s);
+    s.strip_suffix("```").unwrap_or(s).trim()
+}
+
 fn truncate(s: &str, max: usize) -> String {
     if s.len() > max {
         format!("{}...", &s[..max])
@@ -1477,15 +1488,7 @@ async fn main() -> anyhow::Result<()> {
                     }
 
                     // The model returns JSON (possibly wrapped in a ```json fence).
-                    let json_str = result_text.trim();
-                    let json_str = json_str
-                        .strip_prefix("```json")
-                        .or_else(|| json_str.strip_prefix("```"))
-                        .unwrap_or(json_str);
-                    let json_str = json_str
-                        .strip_suffix("```")
-                        .unwrap_or(json_str)
-                        .trim();
+                    let json_str = strip_json_fence(&result_text);
 
                     let gen: SkillGen = serde_json::from_str(json_str)
                         .map_err(|e| anyhow::anyhow!("Failed to parse AI response as JSON: {e}"))?;
@@ -2163,4 +2166,48 @@ async fn run_repl(agent: StarpodAgent, name: &str) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_json_fence_plain_json() {
+        let input = r#"{"description": "hello", "body": "world"}"#;
+        assert_eq!(strip_json_fence(input), input);
+    }
+
+    #[test]
+    fn strip_json_fence_with_json_fence() {
+        let input = "```json\n{\"description\": \"hello\"}\n```";
+        assert_eq!(strip_json_fence(input), r#"{"description": "hello"}"#);
+    }
+
+    #[test]
+    fn strip_json_fence_with_bare_fence() {
+        let input = "```\n{\"body\": \"test\"}\n```";
+        assert_eq!(strip_json_fence(input), r#"{"body": "test"}"#);
+    }
+
+    #[test]
+    fn strip_json_fence_with_surrounding_whitespace() {
+        let input = "  \n```json\n{\"a\": 1}\n```\n  ";
+        assert_eq!(strip_json_fence(input), r#"{"a": 1}"#);
+    }
+
+    #[test]
+    fn strip_json_fence_no_fence_with_whitespace() {
+        let input = "  {\"a\": 1}  ";
+        assert_eq!(strip_json_fence(input), r#"{"a": 1}"#);
+    }
+
+    #[test]
+    fn strip_json_fence_multiline_body() {
+        let input = "```json\n{\n  \"description\": \"d\",\n  \"body\": \"line1\\nline2\"\n}\n```";
+        let result = strip_json_fence(input);
+        assert!(result.starts_with('{'));
+        assert!(result.ends_with('}'));
+        let _: serde_json::Value = serde_json::from_str(result).unwrap();
+    }
 }

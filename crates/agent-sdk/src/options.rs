@@ -691,6 +691,24 @@ mod tests {
     }
 
     #[test]
+    fn builder_output_format_default_is_none() {
+        let opts = Options::builder().build();
+        assert!(opts.output_format.is_none());
+    }
+
+    #[test]
+    fn builder_output_format_sets_field() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" }
+            }
+        });
+        let opts = Options::builder().output_format(schema.clone()).build();
+        assert_eq!(opts.output_format, Some(schema));
+    }
+
+    #[test]
     fn builder_pre_compact_handler_default_is_none() {
         let opts = Options::builder().build();
         assert!(opts.pre_compact_handler.is_none());
