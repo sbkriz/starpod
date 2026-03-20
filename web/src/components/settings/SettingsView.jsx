@@ -1,6 +1,7 @@
 import { useApp } from '../../contexts/AppContext'
 import GeneralTab from './GeneralTab'
 import FileTab from './FileTab'
+import HeartbeatTab from './HeartbeatTab'
 import FrontendTab from './FrontendTab'
 import MemoryTab from './MemoryTab'
 import CronTab from './CronTab'
@@ -43,7 +44,7 @@ function TabContent({ tab }) {
   switch (tab) {
     case 'general': return <GeneralTab />
     case 'soul': return <FileTab fileName="SOUL.md" description="Defines the agent's personality, tone, and behavior." rows={24} />
-    case 'heartbeat': return <FileTab fileName="HEARTBEAT.md" description="Instructions the agent follows on a recurring heartbeat schedule." rows={20} />
+    case 'heartbeat': return <HeartbeatTab />
     case 'boot': return <FileTab fileName="BOOT.md" description="Instructions executed once on agent startup." rows={20} />
     case 'bootstrap': return <FileTab fileName="BOOTSTRAP.md" description="Instructions for initial instance setup." rows={20} />
     case 'frontend': return <FrontendTab />
@@ -61,42 +62,37 @@ export default function SettingsView() {
   const { settingsActiveTab } = state
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-bg">
-      {/* Fixed header */}
-      <div className="shrink-0 border-b border-border-subtle">
-        <div className="max-w-[740px] mx-auto px-5">
-          <div className="flex items-center gap-3 h-12">
-            <button
-              onClick={() => dispatch({ type: 'HIDE_SETTINGS' })}
-              className="text-muted hover:text-primary p-1.5 rounded-lg hover:bg-elevated transition-colors cursor-pointer"
-            >
-              <svg className="w-4 h-4 stroke-current fill-none stroke-2" viewBox="0 0 24 24" strokeLinecap="round">
-                <path d="M19 12H5M12 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <h1 className="text-primary text-lg font-semibold">Settings</h1>
-          </div>
-
-          {/* Tab bar with groups */}
-          <div className="flex gap-0 overflow-x-auto pb-0">
-            {tabGroups.map((group, gi) => (
-              <div key={group.label} className="flex items-center">
-                {gi > 0 && <div className="tab-group-sep" />}
-                {group.tabs.map(t => (
-                  <button
-                    key={t.id}
-                    onClick={() => dispatch({ type: 'SET_SETTINGS_TAB', payload: t.id })}
-                    className={`settings-tab px-3 py-2 text-xs font-medium cursor-pointer whitespace-nowrap transition-colors ${
-                      settingsActiveTab === t.id ? 'active text-accent' : 'text-muted hover:text-secondary'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
+    <div className="flex h-[100dvh] bg-bg">
+      {/* Left sidebar navigation */}
+      <div className="shrink-0 w-48 border-r border-border-subtle flex flex-col">
+        <div className="flex items-center gap-3 h-12 px-4 shrink-0">
+          <button
+            onClick={() => dispatch({ type: 'HIDE_SETTINGS' })}
+            className="text-muted hover:text-primary p-1.5 rounded-lg hover:bg-elevated transition-colors cursor-pointer"
+          >
+            <svg className="w-4 h-4 stroke-current fill-none stroke-2" viewBox="0 0 24 24" strokeLinecap="round">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <h1 className="text-primary text-lg font-semibold">Settings</h1>
         </div>
+
+        <nav className="flex-1 overflow-y-auto px-3 py-2">
+          {tabGroups.map((group, gi) => (
+            <div key={group.label} className={gi > 0 ? 'mt-4' : ''}>
+              <div className="settings-nav-group-label">{group.label}</div>
+              {group.tabs.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => dispatch({ type: 'SET_SETTINGS_TAB', payload: t.id })}
+                  className={`settings-nav-item ${settingsActiveTab === t.id ? 'active' : ''}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
       </div>
 
       {/* Scrollable content */}

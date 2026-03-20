@@ -466,18 +466,39 @@ html, body {
 }
 
 /* ── Settings page ── */
-.settings-tab {
-  border-bottom: 2px solid transparent;
-  padding-bottom: calc(0.5rem - 2px);
-  background: none;
-  border-top: none;
-  border-left: none;
-  border-right: none;
+.settings-nav-group-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted);
+  padding: 4px 8px;
+  margin-bottom: 2px;
 }
 
-.settings-tab.active {
+.settings-nav-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--color-muted);
+  border: none;
+  background: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.settings-nav-item:hover {
+  color: var(--color-secondary);
+  background: var(--color-elevated);
+}
+
+.settings-nav-item.active {
   color: var(--color-accent);
-  border-bottom-color: var(--color-accent);
+  background: var(--color-elevated);
 }
 
 /* ── Settings design system ── */
@@ -812,15 +833,6 @@ html, body {
 
 .user-card:hover, .skill-card:hover { border-color: var(--color-border-main); }
 
-/* Tab group separator */
-.tab-group-sep {
-  width: 1px;
-  height: 16px;
-  background: var(--color-border-main);
-  margin: 0 6px;
-  flex-shrink: 0;
-  opacity: 0.5;
-}
 
 /* Prompt chip editor */
 .prompt-item {
