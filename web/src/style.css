@@ -45,10 +45,10 @@ html, body {
 ::selection { background: rgba(59,130,246,0.25); }
 
 /* ── Scrollbar ── */
-::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--color-border-main); border-radius: 999px; }
-::-webkit-scrollbar-thumb:hover { background: var(--color-dim); }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
 
 /* ── Layout ── */
 #layout {
@@ -764,6 +764,7 @@ html, body {
   padding: 12px 14px;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
   background: linear-gradient(to top, var(--color-bg) 70%, transparent);
 }
