@@ -16,11 +16,12 @@ export default function ChannelsTab() {
 
   if (!config) return <div className="text-dim text-sm py-8 text-center">Loading...</div>
 
-  const tg = config.telegram || { enabled: false, gap_minutes: 360, stream_mode: 'final_only' }
+  const tg = config.telegram || { enabled: false, gap_minutes: 360, stream_mode: 'final_only', bot_token: '' }
   const setTg = (key, val) => setConfig(prev => ({
     ...prev,
     telegram: { ...prev.telegram, [key]: val },
   }))
+  const hasToken = !!(tg.bot_token && tg.bot_token.trim())
 
   const save = async () => {
     setSaving(true); setStatus(null)
@@ -35,16 +36,27 @@ export default function ChannelsTab() {
     <>
       <Card title="Telegram">
         <Toggle label="Enabled" checked={tg.enabled} onChange={v => setTg('enabled', v)} />
-        <Row label="Session gap" sub="minutes of inactivity before new session">
-          <Input type="number" value={tg.gap_minutes ?? 360} onChange={v => setTg('gap_minutes', v === '' ? null : Number(v))} placeholder="360" />
-        </Row>
-        <Row label="Stream mode" sub="how messages are sent to Telegram">
-          <Select value={tg.stream_mode || 'final_only'} onChange={v => setTg('stream_mode', v)} options={[
-            { value: 'final_only', label: 'Final only' },
-            { value: 'all_messages', label: 'All messages' },
-          ]} />
-        </Row>
-        <div className="text-dim text-xs mt-2 px-1">Bot token is configured via TELEGRAM_BOT_TOKEN in .env</div>
+        {tg.enabled && (
+          <>
+            <Row label="Bot token" sub="from @BotFather on Telegram">
+              <Input type="password" value={tg.bot_token ?? ''} onChange={v => setTg('bot_token', v)} placeholder="123456:ABC-DEF..." />
+            </Row>
+            {!hasToken && (
+              <div className="text-dim text-xs px-1 pb-2">
+                To get a bot token, message <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">@BotFather</a> on Telegram, send <code>/newbot</code>, and paste the token here. A restart is required after changing the token.
+              </div>
+            )}
+            <Row label="Session gap" sub="minutes of inactivity before new session">
+              <Input type="number" value={tg.gap_minutes ?? 360} onChange={v => setTg('gap_minutes', v === '' ? null : Number(v))} placeholder="360" />
+            </Row>
+            <Row label="Stream mode" sub="how messages are sent to Telegram">
+              <Select value={tg.stream_mode || 'final_only'} onChange={v => setTg('stream_mode', v)} options={[
+                { value: 'final_only', label: 'Final only' },
+                { value: 'all_messages', label: 'All messages' },
+              ]} />
+            </Row>
+          </>
+        )}
       </Card>
 
       <SaveBar onSave={save} saving={saving} status={status} />

@@ -128,8 +128,7 @@ pub struct ProvidersConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TelegramChannelConfig {
-    /// Whether this channel is enabled (default: true).
-    #[serde(default = "default_true")]
+    /// Whether this channel is enabled (default: false).
     pub enabled: bool,
     /// Inactivity gap (in minutes) before auto-closing a Telegram session (default: 360 = 6h).
     #[serde(default = "default_gap_minutes")]
@@ -146,7 +145,7 @@ fn default_gap_minutes() -> Option<i64> { Some(360) }
 impl Default for TelegramChannelConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             gap_minutes: default_gap_minutes(),
             stream_mode: default_stream_mode(),
         }

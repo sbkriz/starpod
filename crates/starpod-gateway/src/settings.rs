@@ -35,6 +35,8 @@ use serde::{Deserialize, Serialize};
 use starpod_auth::Role;
 use starpod_core::{FrontendConfig, FollowupMode, ReasoningEffort};
 
+use starpod_core::ResolvedPaths;
+
 use crate::routes::{authenticate_request, ErrorResponse};
 use crate::AppState;
 
@@ -222,6 +224,9 @@ struct TelegramChannelSettings {
     gap_minutes: Option<i64>,
     #[serde(default)]
     stream_mode: Option<String>,
+    /// Bot token — read from / written to `.env` as `TELEGRAM_BOT_TOKEN`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bot_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1272,11 +1277,13 @@ async fn get_channels(
 
     let cfg = state.config.read().unwrap();
     let tg = cfg.channels.telegram.clone().unwrap_or_default();
+    let bot_token = read_env_var(&state.paths, "TELEGRAM_BOT_TOKEN");
     Ok(Json(ChannelsSettings {
         telegram: TelegramChannelSettings {
             enabled: tg.enabled,
             gap_minutes: tg.gap_minutes,
             stream_mode: Some(tg.stream_mode),
+            bot_token,
         },
     }))
 }
@@ -1315,6 +1322,12 @@ async fn put_channels(
     }
 
     write_agent_toml(&state, &doc)?;
+
+    // Write bot token to .env file
+    if let Some(ref token) = settings.telegram.bot_token {
+        write_env_var(&state.paths, "TELEGRAM_BOT_TOKEN", if token.is_empty() { None } else { Some(token) })?;
+    }
+
     Ok(ok_json())
 }
 
@@ -1417,6 +1430,72 @@ fn set_or_remove_string(table: &mut toml::map::Map<String, toml::Value>, key: &s
         Some(v) if !v.is_empty() => { table.insert(key.into(), toml::Value::String(v)); }
         _ => { table.remove(key); }
     }
+}
+
+/// Read a variable from the `.env` file (raw file parsing, not `std::env`).
+fn read_env_var(paths: &ResolvedPaths, key: &str) -> Option<String> {
+    let env_path = paths.agent_home.join(".env");
+    let content = std::fs::read_to_string(&env_path).ok()?;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix(key) {
+            if let Some(value) = rest.strip_prefix('=') {
+                return Some(value.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Write (or remove) a variable in the `.env` file.
+fn write_env_var(
+    paths: &ResolvedPaths,
+    key: &str,
+    value: Option<&str>,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    let env_path = paths.agent_home.join(".env");
+    let content = std::fs::read_to_string(&env_path).unwrap_or_default();
+
+    let mut found = false;
+    let mut lines: Vec<String> = content
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with(&format!("{key}=")) {
+                found = true;
+                // Replace or remove
+                value.map(|v| format!("{key}={v}"))
+            } else {
+                Some(line.to_string())
+            }
+        })
+        .collect();
+
+    if !found {
+        if let Some(v) = value {
+            lines.push(format!("{key}={v}"));
+        }
+    }
+
+    // Ensure trailing newline
+    let mut output = lines.join("\n");
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+
+    std::fs::write(&env_path, output)
+        .map_err(|e| internal(format!("Failed to write {}: {}", env_path.display(), e)))?;
+
+    // Also update the process env so config reload picks it up
+    match value {
+        Some(v) => std::env::set_var(key, v),
+        None => std::env::remove_var(key),
+    }
+
+    Ok(())
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -2388,8 +2467,8 @@ mod tests {
         let (_tmp, state) = test_app_state().await;
         let (status, json) = get_json(state, "/api/settings/channels").await;
         assert_eq!(status, StatusCode::OK);
-        // No [channels.telegram] in test config → defaults (enabled: true by default)
-        assert_eq!(json["telegram"]["enabled"], true);
+        // No [channels.telegram] in test config → defaults (enabled: false by default)
+        assert_eq!(json["telegram"]["enabled"], false);
         assert_eq!(json["telegram"]["gap_minutes"], 360);
         assert_eq!(json["telegram"]["stream_mode"], "final_only");
     }
@@ -2535,6 +2614,7 @@ mod tests {
                 enabled: true,
                 gap_minutes: Some(120),
                 stream_mode: Some("all_messages".into()),
+                bot_token: None,
             },
         };
         let json = serde_json::to_string(&settings).unwrap();
