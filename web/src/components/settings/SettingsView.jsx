@@ -131,6 +131,7 @@ export default function SettingsView() {
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-[740px] mx-auto px-6 py-6">
+            <h2 className="text-primary text-lg font-semibold mb-5">{activeLabel}</h2>
             <TabContent tab={settingsActiveTab} />
           </div>
         </div>
