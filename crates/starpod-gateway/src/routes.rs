@@ -659,8 +659,9 @@ mod tests {
             config_dir,
             db_dir: db_dir.clone(),
             skills_dir,
-            project_root: tmp.path().to_path_buf(),
+            project_root: tmp.path().join("home"),
             instance_root: tmp.path().to_path_buf(),
+            home_dir: tmp.path().join("home"),
             users_dir,
             env_file: None,
         };

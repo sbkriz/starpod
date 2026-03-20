@@ -38,7 +38,11 @@
 //!         |   +-- skills/             # merged on build (blueprint overrides, user additions preserved)
 //!         |   +-- db/                 # SQLite databases (runtime, never touched by build)
 //!         |   +-- users/{admin,user}/  # per-user data (runtime)
-//!         +-- reports/                # agent creates freely
+//!         +-- home/                   # agent's visible filesystem (sandbox)
+//!             +-- desktop/
+//!             +-- documents/
+//!             +-- projects/
+//!             +-- downloads/
 //! ```
 //!
 //! **Single-agent mode (prod):**
@@ -55,7 +59,11 @@
 //! |   +-- skills/                     # merged on build
 //! |   +-- db/                         # SQLite databases (runtime)
 //! |   +-- users/{admin,user}/          # per-user data (runtime)
-//! +-- reports/                        # agent-produced files
+//! +-- home/                           # agent's visible filesystem (sandbox)
+//!     +-- desktop/
+//!     +-- documents/
+//!     +-- projects/
+//!     +-- downloads/
 //! ```
 //!
 //! # Usage
@@ -242,8 +250,10 @@ pub struct ResolvedPaths {
     pub skills_dir: PathBuf,
     /// Project/workspace root.
     pub project_root: PathBuf,
-    /// Agent's filesystem sandbox root (where agent can freely create files).
+    /// Agent's filesystem sandbox root (parent of .starpod/ and home/).
     pub instance_root: PathBuf,
+    /// Agent's home directory — visible filesystem sandbox (instance_root/home/).
+    pub home_dir: PathBuf,
     /// Per-user data directory (.starpod/users/).
     pub users_dir: PathBuf,
     /// .env file path (if it exists).
@@ -269,7 +279,8 @@ impl ResolvedPaths {
                         StarpodError::Config("Invalid .starpod/ path".to_string())
                     })?
                     .to_path_buf();
-                let project_root = instance_root.clone();
+                let home_dir = instance_root.join("home");
+                let project_root = home_dir.clone();
                 let env_path = starpod_dir.join(".env");
 
                 Ok(Self {
@@ -281,6 +292,7 @@ impl ResolvedPaths {
                     skills_dir,
                     project_root,
                     instance_root,
+                    home_dir,
                     users_dir,
                     env_file: if env_path.is_file() {
                         Some(env_path)
@@ -299,10 +311,11 @@ impl ResolvedPaths {
                 // Skills always live at instance level (.starpod/skills/).
                 // Workspace skills are copied into the instance during blueprint application.
                 let skills_dir = agent_home.join("skills");
-                // The agent's sandbox is the instance directory, not the
-                // workspace root.  project_root controls cwd, system-prompt
-                // paths, and file-tool boundaries.
-                let project_root = instance_root.clone();
+                // The agent's visible sandbox is home/ inside the instance
+                // directory.  project_root controls cwd, system-prompt paths,
+                // and file-tool boundaries.
+                let home_dir = instance_root.join("home");
+                let project_root = home_dir.clone();
 
                 Ok(Self {
                     mode: mode.clone(),
@@ -313,6 +326,7 @@ impl ResolvedPaths {
                     skills_dir,
                     project_root,
                     instance_root: instance_root.clone(),
+                    home_dir,
                     users_dir,
                     env_file: if env_path.is_file() {
                         Some(env_path)
@@ -954,8 +968,9 @@ mod tests {
         assert_eq!(paths.config_dir, PathBuf::from("/app/.starpod/config"));
         assert_eq!(paths.db_dir, PathBuf::from("/app/.starpod/db"));
         assert_eq!(paths.skills_dir, PathBuf::from("/app/.starpod/skills"));
-        assert_eq!(paths.project_root, PathBuf::from("/app"));
+        assert_eq!(paths.project_root, PathBuf::from("/app/home"));
         assert_eq!(paths.instance_root, PathBuf::from("/app"));
+        assert_eq!(paths.home_dir, PathBuf::from("/app/home"));
         assert_eq!(paths.users_dir, PathBuf::from("/app/.starpod/users"));
     }
 
@@ -984,6 +999,8 @@ mod tests {
         // Should auto-apply and resolve as instance
         let instance_dir = root.join(".instances").join("sales-rep");
         assert_eq!(paths.instance_root, instance_dir);
+        assert_eq!(paths.home_dir, instance_dir.join("home"));
+        assert_eq!(paths.project_root, instance_dir.join("home"));
         assert_eq!(paths.agent_home, instance_dir.join(".starpod"));
         assert_eq!(paths.db_dir, instance_dir.join(".starpod/db"));
         assert!(paths.env_file.is_some());
@@ -1026,8 +1043,9 @@ mod tests {
         assert_eq!(paths.config_dir, config_dir);
         assert_eq!(paths.db_dir, instance_dir.join(".starpod/db"));
         assert_eq!(paths.skills_dir, starpod_dir.join("skills"));
-        assert_eq!(paths.project_root, instance_dir);
+        assert_eq!(paths.project_root, instance_dir.join("home"));
         assert_eq!(paths.instance_root, instance_dir);
+        assert_eq!(paths.home_dir, instance_dir.join("home"));
         assert_eq!(paths.users_dir, instance_dir.join(".starpod/users"));
     }
 
@@ -1204,8 +1222,9 @@ max_turns = 30
             config_dir: PathBuf::from("/app/.starpod/config"),
             db_dir: PathBuf::from("/app/.starpod/db"),
             skills_dir: PathBuf::from("/app/.starpod/skills"),
-            project_root: PathBuf::from("/app"),
+            project_root: PathBuf::from("/app/home"),
             instance_root: PathBuf::from("/app"),
+            home_dir: PathBuf::from("/app/home"),
             users_dir: PathBuf::from("/app/.starpod/users"),
             env_file: None,
         };
@@ -1214,7 +1233,7 @@ max_turns = 30
         assert_eq!(starpod_config.agent_name, "TestBot");
         assert_eq!(starpod_config.model, "claude-haiku-4-5");
         assert_eq!(starpod_config.db_dir, PathBuf::from("/app/.starpod/db"));
-        assert_eq!(starpod_config.project_root, PathBuf::from("/app"));
+        assert_eq!(starpod_config.project_root, PathBuf::from("/app/home"));
     }
 
     #[test]

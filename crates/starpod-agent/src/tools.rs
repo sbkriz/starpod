@@ -18,7 +18,7 @@ pub struct ToolContext {
     pub skills: Arc<SkillStore>,
     pub cron: Arc<CronStore>,
     pub user_tz: Option<String>,
-    pub instance_root: PathBuf,
+    pub home_dir: PathBuf,
     pub user_id: Option<String>,
 }
 
@@ -94,7 +94,7 @@ pub fn custom_tool_definitions() -> Vec<CustomToolDefinition> {
         // --- File tools ---
         CustomToolDefinition {
             name: "FileRead".into(),
-            description: "Read a file from the agent's filesystem sandbox. Path is relative to the instance root.".into(),
+            description: "Read a file from the agent's filesystem sandbox. Path is relative to the home directory.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -108,7 +108,7 @@ pub fn custom_tool_definitions() -> Vec<CustomToolDefinition> {
         },
         CustomToolDefinition {
             name: "FileWrite".into(),
-            description: "Write a file to the agent's filesystem sandbox. Path is relative to the instance root. Creates parent directories as needed.".into(),
+            description: "Write a file to the agent's filesystem sandbox. Path is relative to the home directory. Creates parent directories as needed.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -126,7 +126,7 @@ pub fn custom_tool_definitions() -> Vec<CustomToolDefinition> {
         },
         CustomToolDefinition {
             name: "FileList".into(),
-            description: "List files and directories in the agent's filesystem sandbox. Path is relative to the instance root.".into(),
+            description: "List files and directories in the agent's filesystem sandbox. Path is relative to the home directory.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -139,7 +139,7 @@ pub fn custom_tool_definitions() -> Vec<CustomToolDefinition> {
         },
         CustomToolDefinition {
             name: "FileDelete".into(),
-            description: "Delete a file from the agent's filesystem sandbox. Path is relative to the instance root.".into(),
+            description: "Delete a file from the agent's filesystem sandbox. Path is relative to the home directory.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -418,13 +418,13 @@ pub fn custom_tool_definitions() -> Vec<CustomToolDefinition> {
 
 // ── Sandbox path validation ──────────────────────────────────────────────────
 
-/// Validate and resolve a relative path within the instance sandbox.
+/// Validate and resolve a relative path within the home directory sandbox.
 ///
 /// Rejects paths that:
-/// - Start with `.starpod` (internal state)
+/// - Start with `.starpod` (defense-in-depth)
 /// - Contain `..` traversal
 /// - Are absolute paths
-fn validate_sandbox_path(relative: &str, instance_root: &Path) -> std::result::Result<PathBuf, String> {
+fn validate_sandbox_path(relative: &str, home_dir: &Path) -> std::result::Result<PathBuf, String> {
     // Reject absolute paths
     if relative.starts_with('/') || relative.starts_with('\\') {
         return Err("Absolute paths are not allowed".into());
@@ -443,12 +443,12 @@ fn validate_sandbox_path(relative: &str, instance_root: &Path) -> std::result::R
         return Err("Cannot access .starpod/ directory — it contains internal state".into());
     }
 
-    let resolved = instance_root.join(relative);
+    let resolved = home_dir.join(relative);
 
     // Double-check: canonicalize if the path exists
     if resolved.exists() {
         let canonical = resolved.canonicalize().map_err(|e| format!("Failed to resolve path: {}", e))?;
-        let root_canonical = instance_root.canonicalize().map_err(|e| format!("Failed to resolve root: {}", e))?;
+        let root_canonical = home_dir.canonicalize().map_err(|e| format!("Failed to resolve root: {}", e))?;
         if !canonical.starts_with(&root_canonical) {
             return Err("Path resolves outside the sandbox".into());
         }
@@ -577,7 +577,7 @@ pub async fn handle_custom_tool(
 
             debug!(path = %path, "FileRead");
 
-            match validate_sandbox_path(path, &ctx.instance_root) {
+            match validate_sandbox_path(path, &ctx.home_dir) {
                 Ok(resolved) => {
                     if !resolved.is_file() {
                         return Some(ToolResult {
@@ -613,7 +613,7 @@ pub async fn handle_custom_tool(
 
             debug!(path = %path, "FileWrite");
 
-            match validate_sandbox_path(path, &ctx.instance_root) {
+            match validate_sandbox_path(path, &ctx.home_dir) {
                 Ok(resolved) => {
                     // Create parent directories
                     if let Some(parent) = resolved.parent() {
@@ -652,9 +652,9 @@ pub async fn handle_custom_tool(
             debug!(path = %path, "FileList");
 
             let resolved = if path == "." {
-                ctx.instance_root.clone()
+                ctx.home_dir.clone()
             } else {
-                match validate_sandbox_path(path, &ctx.instance_root) {
+                match validate_sandbox_path(path, &ctx.home_dir) {
                     Ok(p) => p,
                     Err(e) => return Some(ToolResult {
                         content: format!("Invalid path: {}", e),
@@ -713,7 +713,7 @@ pub async fn handle_custom_tool(
 
             debug!(path = %path, "FileDelete");
 
-            match validate_sandbox_path(path, &ctx.instance_root) {
+            match validate_sandbox_path(path, &ctx.home_dir) {
                 Ok(resolved) => {
                     if !resolved.exists() {
                         return Some(ToolResult {
@@ -1335,7 +1335,7 @@ mod tests {
             skills,
             cron,
             user_tz: None,
-            instance_root: tmp.path().to_path_buf(),
+            home_dir: tmp.path().to_path_buf(),
             user_id: Some("admin".into()),
         };
 
@@ -1364,7 +1364,7 @@ mod tests {
             skills,
             cron,
             user_tz: None,
-            instance_root: tmp.path().to_path_buf(),
+            home_dir: tmp.path().to_path_buf(),
             user_id: Some("admin".into()),
         };
 
@@ -1391,7 +1391,7 @@ mod tests {
             skills,
             cron,
             user_tz: None,
-            instance_root: tmp.path().to_path_buf(),
+            home_dir: tmp.path().to_path_buf(),
             user_id: Some("admin".into()),
         };
 
@@ -1427,15 +1427,15 @@ mod tests {
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
         let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
 
-        let instance_root = tmp.path().join("instance");
-        std::fs::create_dir_all(&instance_root).unwrap();
+        let home_dir = tmp.path().join("instance");
+        std::fs::create_dir_all(&home_dir).unwrap();
 
         let ctx = ToolContext {
             memory,
             skills,
             cron,
             user_tz: None,
-            instance_root: instance_root.clone(),
+            home_dir: home_dir.clone(),
             user_id: Some("admin".into()),
         };
 
@@ -1464,16 +1464,16 @@ mod tests {
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
         let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
 
-        let instance_root = tmp.path().join("instance");
-        std::fs::create_dir_all(instance_root.join(".starpod")).unwrap();
-        std::fs::write(instance_root.join("visible.txt"), "hi").unwrap();
+        let home_dir = tmp.path().join("instance");
+        std::fs::create_dir_all(home_dir.join(".starpod")).unwrap();
+        std::fs::write(home_dir.join("visible.txt"), "hi").unwrap();
 
         let ctx = ToolContext {
             memory,
             skills,
             cron,
             user_tz: None,
-            instance_root: instance_root.clone(),
+            home_dir: home_dir.clone(),
             user_id: Some("admin".into()),
         };
 
@@ -1494,16 +1494,16 @@ mod tests {
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
         let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
 
-        let instance_root = tmp.path().join("instance");
-        std::fs::create_dir_all(&instance_root).unwrap();
-        std::fs::write(instance_root.join("deleteme.txt"), "bye").unwrap();
+        let home_dir = tmp.path().join("instance");
+        std::fs::create_dir_all(&home_dir).unwrap();
+        std::fs::write(home_dir.join("deleteme.txt"), "bye").unwrap();
 
         let ctx = ToolContext {
             memory,
             skills,
             cron,
             user_tz: None,
-            instance_root: instance_root.clone(),
+            home_dir: home_dir.clone(),
             user_id: Some("admin".into()),
         };
 
@@ -1513,7 +1513,7 @@ mod tests {
             &serde_json::json!({"path": "deleteme.txt"}),
         ).await.unwrap();
         assert!(!result.is_error);
-        assert!(!instance_root.join("deleteme.txt").exists());
+        assert!(!home_dir.join("deleteme.txt").exists());
     }
 
     #[tokio::test]
@@ -1523,8 +1523,8 @@ mod tests {
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
         let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
 
-        let instance_root = tmp.path().join("instance");
-        let starpod = instance_root.join(".starpod");
+        let home_dir = tmp.path().join("instance");
+        let starpod = home_dir.join(".starpod");
         std::fs::create_dir_all(&starpod).unwrap();
         std::fs::write(starpod.join("agent.toml"), "secret").unwrap();
 
@@ -1533,7 +1533,7 @@ mod tests {
             skills,
             cron,
             user_tz: None,
-            instance_root: instance_root.clone(),
+            home_dir: home_dir.clone(),
             user_id: Some("admin".into()),
         };
 
@@ -1552,15 +1552,15 @@ mod tests {
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
         let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
 
-        let instance_root = tmp.path().join("instance");
-        std::fs::create_dir_all(&instance_root).unwrap();
+        let home_dir = tmp.path().join("instance");
+        std::fs::create_dir_all(&home_dir).unwrap();
 
         let ctx = ToolContext {
             memory,
             skills,
             cron,
             user_tz: None,
-            instance_root,
+            home_dir,
             user_id: Some("admin".into()),
         };
 

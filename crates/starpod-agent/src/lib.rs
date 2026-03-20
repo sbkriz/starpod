@@ -80,6 +80,8 @@ impl StarpodAgent {
         };
 
         let starpod_dir = config.db_dir.parent().unwrap_or(&config.db_dir).to_path_buf();
+        let instance_root = starpod_dir.parent().unwrap_or(&starpod_dir).to_path_buf();
+        let home_dir = instance_root.join("home");
         let paths = ResolvedPaths {
             mode: starpod_core::Mode::SingleAgent {
                 starpod_dir: starpod_dir.clone(),
@@ -89,8 +91,9 @@ impl StarpodAgent {
             config_dir: starpod_dir.join("config"),
             db_dir: config.db_dir.clone(),
             skills_dir: starpod_dir.join("skills"),
-            project_root: config.project_root.clone(),
-            instance_root: config.project_root.clone(),
+            project_root: home_dir.clone(),
+            instance_root,
+            home_dir,
             users_dir: starpod_dir.join("users"),
             env_file: None,
         };
@@ -484,7 +487,7 @@ impl StarpodAgent {
             skills: Arc::clone(&self.skills),
             cron: Arc::clone(&self.cron),
             user_tz: config.resolved_timezone(),
-            instance_root: self.paths.instance_root.clone(),
+            home_dir: self.paths.home_dir.clone(),
             user_id: user_id.map(|s| s.to_string()),
         });
 
@@ -1228,8 +1231,9 @@ mod tests {
             config_dir: agent_home.clone(),
             db_dir: db_dir.clone(),
             skills_dir: skills_dir.clone(),
-            project_root: tmp.path().to_path_buf(),
-            instance_root: agent_home.clone(),
+            project_root: tmp.path().join("home"),
+            instance_root: tmp.path().to_path_buf(),
+            home_dir: tmp.path().join("home"),
             users_dir: agent_home.join("users"),
             env_file: None,
         };
@@ -1244,7 +1248,7 @@ mod tests {
         // paths() returns the workspace paths
         assert_eq!(agent.paths().agent_home, agent_home);
         assert_eq!(agent.paths().skills_dir, skills_dir);
-        assert_eq!(agent.paths().project_root, tmp.path());
+        assert_eq!(agent.paths().project_root, tmp.path().join("home"));
 
         // Memory uses agent_home
         let ctx = agent.memory().bootstrap_context().unwrap();
@@ -1279,8 +1283,9 @@ mod tests {
             config_dir: agent_home.clone(),
             db_dir: agent_home.join("db"),
             skills_dir: skills_dir.clone(),
-            project_root: tmp.path().to_path_buf(),
+            project_root: tmp.path().join("home"),
             instance_root: tmp.path().to_path_buf(),
+            home_dir: tmp.path().join("home"),
             users_dir: agent_home.join("users"),
             env_file: None,
         };
@@ -1359,7 +1364,7 @@ mod tests {
             skills: Arc::clone(agent.skills()),
             cron: Arc::clone(agent.cron()),
             user_tz: None,
-            instance_root: tmp.path().to_path_buf(),
+            home_dir: tmp.path().to_path_buf(),
             user_id: Some("admin".into()),
         };
 

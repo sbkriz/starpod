@@ -53,14 +53,19 @@ pub enum EnvSource {
 /// │           ├── USER.md
 /// │           ├── MEMORY.md
 /// │           └── memory/      ← daily logs
-/// └── ...                      ← agent-created files
+/// ├── home/                    ← agent's visible filesystem (sandbox)
+/// │   ├── desktop/
+/// │   ├── documents/
+/// │   ├── projects/
+/// │   └── downloads/
+/// └── ...
 /// ```
 ///
 /// # Preservation rules
 ///
 /// - Existing user directories are never overwritten.
 /// - Existing databases (db/*.db) are preserved.
-/// - Blueprint `files/*` are synced to instance root, but never overwrite `.starpod/`.
+/// - Blueprint `files/*` are synced to `home/`, the agent's visible filesystem.
 /// - `config/` is always refreshed from the blueprint (agent.toml, SOUL.md, lifecycle files).
 /// - `skills/` are merged: blueprint skills overwrite by filename, user-created skills preserved.
 /// - `.env` is read from `workspace_dir` (top level), not from the blueprint.
@@ -82,6 +87,12 @@ pub fn apply_blueprint(
         .map_err(StarpodError::Io)?;
     std::fs::create_dir_all(starpod_dir.join("users"))
         .map_err(StarpodError::Io)?;
+
+    // 1b. Create home/ directory with placeholder subdirs
+    let home_dir = instance_dir.join("home");
+    for sub in &["desktop", "documents", "projects", "downloads"] {
+        std::fs::create_dir_all(home_dir.join(sub)).map_err(StarpodError::Io)?;
+    }
 
     // 2. Copy blueprint-managed files into config/ (always refresh)
     // Lifecycle files from blueprint
@@ -140,11 +151,11 @@ pub fn apply_blueprint(
         debug!(source = %src.display(), "Copied .env from workspace");
     }
 
-    // 4. Sync files/ → instance root (excluding .starpod/)
+    // 4. Sync files/ → home/ directory
     let files_dir = blueprint_dir.join("files");
     if files_dir.is_dir() {
-        sync_files(&files_dir, instance_dir)?;
-        debug!("Synced template files from blueprint");
+        sync_files(&files_dir, &home_dir)?;
+        debug!("Synced template files from blueprint into home/");
     }
 
     // 5. Merge workspace skills/ → instance .starpod/skills/
@@ -215,6 +226,12 @@ pub fn build_standalone(
     std::fs::create_dir_all(starpod_dir.join("users"))
         .map_err(StarpodError::Io)?;
 
+    // 1b. Create home/ directory with placeholder subdirs
+    let home_dir = output_dir.join("home");
+    for sub in &["desktop", "documents", "projects", "downloads"] {
+        std::fs::create_dir_all(home_dir.join(sub)).map_err(StarpodError::Io)?;
+    }
+
     // 2. Copy blueprint-managed files into config/ (always refresh)
     for name in &["HEARTBEAT.md", "BOOT.md", "BOOTSTRAP.md", "frontend.toml"] {
         let src = blueprint_dir.join(name);
@@ -258,11 +275,11 @@ pub fn build_standalone(
         }
     }
 
-    // 4. Sync files/ → output root (excluding .starpod/)
+    // 4. Sync files/ → home/ directory
     let files_dir = blueprint_dir.join("files");
     if files_dir.is_dir() {
-        sync_files(&files_dir, output_dir)?;
-        debug!("Synced template files from blueprint");
+        sync_files(&files_dir, &home_dir)?;
+        debug!("Synced template files from blueprint into home/");
     }
 
     // 5. Merge skills: blueprint overrides by filename, user additions preserved
@@ -442,9 +459,51 @@ mod tests {
 
         apply_blueprint(&blueprint, &instance, tmp.path(), EnvSource::Dev).unwrap();
 
-        assert!(instance.join("templates").join("report.md").is_file());
+        assert!(instance.join("home").join("templates").join("report.md").is_file());
     }
 
+    #[test]
+    fn apply_blueprint_creates_home_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let blueprint = setup_blueprint(&tmp);
+        let instance = tmp.path().join(".instances").join("test-bot");
+
+        apply_blueprint(&blueprint, &instance, tmp.path(), EnvSource::Dev).unwrap();
+
+        let home = instance.join("home");
+        assert!(home.join("desktop").is_dir());
+        assert!(home.join("documents").is_dir());
+        assert!(home.join("projects").is_dir());
+        assert!(home.join("downloads").is_dir());
+    }
+
+    #[test]
+    fn apply_blueprint_preserves_home_files_on_reapply() {
+        let tmp = TempDir::new().unwrap();
+        let blueprint = setup_blueprint(&tmp);
+        let instance = tmp.path().join(".instances").join("test-bot");
+
+        apply_blueprint(&blueprint, &instance, tmp.path(), EnvSource::Dev).unwrap();
+
+        // Simulate agent creating files in home/
+        let home = instance.join("home");
+        std::fs::write(home.join("documents").join("notes.md"), "My notes").unwrap();
+        std::fs::create_dir_all(home.join("projects").join("my-app")).unwrap();
+        std::fs::write(home.join("projects").join("my-app").join("main.rs"), "fn main() {}").unwrap();
+
+        // Re-apply blueprint
+        apply_blueprint(&blueprint, &instance, tmp.path(), EnvSource::Dev).unwrap();
+
+        // Agent-created files should be preserved
+        assert_eq!(
+            std::fs::read_to_string(home.join("documents").join("notes.md")).unwrap(),
+            "My notes"
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.join("projects").join("my-app").join("main.rs")).unwrap(),
+            "fn main() {}"
+        );
+    }
 
     #[test]
     fn apply_blueprint_refreshes_agent_toml() {
@@ -757,7 +816,26 @@ mod tests {
 
         build_standalone(&blueprint, &output, None, None, false).unwrap();
 
-        assert!(output.join("templates").join("report.md").is_file());
+        assert!(output.join("home").join("templates").join("report.md").is_file());
+    }
+
+    #[test]
+    fn build_standalone_creates_home_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let blueprint = tmp.path().join("my-agent");
+        std::fs::create_dir_all(&blueprint).unwrap();
+        std::fs::write(blueprint.join("agent.toml"), "").unwrap();
+
+        let output = tmp.path().join("deploy");
+        std::fs::create_dir_all(&output).unwrap();
+
+        build_standalone(&blueprint, &output, None, None, false).unwrap();
+
+        let home = output.join("home");
+        assert!(home.join("desktop").is_dir());
+        assert!(home.join("documents").is_dir());
+        assert!(home.join("projects").is_dir());
+        assert!(home.join("downloads").is_dir());
     }
 
     #[test]

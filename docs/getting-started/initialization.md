@@ -83,14 +83,17 @@ your-project/
         │           ├── USER.md
         │           ├── MEMORY.md
         │           └── memory/
-        ├── reports/        Agent-created files
-        └── ...             Full filesystem sandbox
+        └── home/           Agent's visible filesystem (sandbox)
+            ├── desktop/
+            ├── documents/
+            ├── projects/
+            └── downloads/
 ```
 
 - **`starpod.toml`** — workspace-level defaults shared across all agents.
 - **`agents/<name>/`** — agent **blueprints** (git-tracked). Each contains `agent.toml`, `SOUL.md`, and optional lifecycle files. This is the source of truth for what the agent *is*.
 - **`.env`** — API key for your chosen provider (e.g. `ANTHROPIC_API_KEY=sk-ant-...`).
-- **`.instances/`** — agent **instances** (gitignored). Created automatically by `starpod dev`. Contains databases, memory, user data — everything the agent accumulates at runtime. Blueprint files are copied into `.starpod/config/` and refreshed on every `starpod dev`, but runtime data (`db/`, `users/`) is always preserved.
+- **`.instances/`** — agent **instances** (gitignored). Created automatically by `starpod dev`. Contains databases, memory, user data — everything the agent accumulates at runtime. Blueprint files are copied into `.starpod/config/` and refreshed on every `starpod dev`, but runtime data (`db/`, `users/`) is always preserved. The agent's visible filesystem lives in `home/` — file tools (FileRead, FileWrite, etc.) are sandboxed here, and blueprint `files/` are synced into it.
 
 ## Multiple Agents
 

@@ -66,8 +66,11 @@ An instance is the runtime environment created from a blueprint. It lives in `.i
 │           ├── USER.md
 │           ├── MEMORY.md
 │           └── memory/
-├── reports/                        # Agent-created files
-└── ...                             # Anything the agent writes
+└── home/                           # Agent's visible filesystem (sandbox)
+    ├── desktop/
+    ├── documents/
+    ├── projects/
+    └── downloads/
 ```
 
 ### What goes where
@@ -75,7 +78,7 @@ An instance is the runtime environment created from a blueprint. It lives in `.i
 | | Blueprint (`agents/`) | Instance (`.instances/`) |
 |---|---|---|
 | **Tracked in git** | Yes | No (gitignored) |
-| **Contains** | Config, personality, templates | Databases, memory, user data, files |
+| **Contains** | Config, personality, templates | Databases, memory, user data, `home/` sandbox |
 | **Editable by** | Developer | Agent + users at runtime |
 | **On `starpod dev`** | Read-only source | Created/updated from blueprint |
 | **On rebuild** | Source of truth | `config/` overwritten, `db/` + `users/` preserved |
@@ -228,8 +231,11 @@ workspace/
         │           ├── USER.md
         │           ├── MEMORY.md
         │           └── memory/
-        ├── reports/                # agent creates freely
-        └── ...                     # full filesystem sandbox
+        └── home/                   # agent's visible filesystem (sandbox)
+            ├── desktop/
+            ├── documents/
+            ├── projects/
+            └── downloads/
 ```
 
 ### Single-agent (production)
@@ -247,8 +253,11 @@ workspace/
 │   ├── skills/                     # merged on build
 │   ├── users/{admin,user}/          # runtime (auto-created)
 │   └── db/                         # runtime
-├── reports/                        # agent-produced files
-└── ...
+└── home/                           # agent's visible filesystem (sandbox)
+    ├── desktop/
+    ├── documents/
+    ├── projects/
+    └── downloads/
 ```
 
 Starpod auto-detects the mode by walking up from the current directory:
