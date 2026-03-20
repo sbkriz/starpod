@@ -56,7 +56,7 @@ export default function GeneralTab() {
           <Input value={config.agent_name || ''} onChange={v => set('agent_name', v)} placeholder="Aster" />
         </Row>
         <Row label="Timezone">
-          <Input value={config.timezone || ''} onChange={v => set('timezone', v)} placeholder="America/New_York" mono />
+          <Input value={config.timezone || ''} onChange={v => set('timezone', v)} placeholder="Europe/Rome" mono />
         </Row>
         <Row label="Followup mode" helpTip="Inject: followup messages join the current turn. Queue: waits for the turn to finish first.">
           <Select value={config.followup_mode || 'inject'} onChange={v => set('followup_mode', v)} options={[
