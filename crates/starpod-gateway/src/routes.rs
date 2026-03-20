@@ -838,6 +838,92 @@ mod tests {
         assert_eq!(json["status"], "ok");
     }
 
+    // ── Verify endpoint tests ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn verify_pre_bootstrap_returns_auth_disabled() {
+        let (_tmp, state) = test_app_state().await;
+        let app = build_router(Arc::clone(&state));
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/auth/verify")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["authenticated"], true);
+        assert_eq!(json["auth_disabled"], true);
+        assert!(json.get("user").is_none() || json["user"].is_null());
+    }
+
+    #[tokio::test]
+    async fn verify_missing_key_returns_unauthenticated() {
+        let (_tmp, state) = test_app_state().await;
+        state.auth.create_user(None, None, starpod_auth::Role::Admin).await.unwrap();
+
+        let app = build_router(Arc::clone(&state));
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/auth/verify")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["authenticated"], false);
+        assert_eq!(json["auth_disabled"], false);
+    }
+
+    #[tokio::test]
+    async fn verify_invalid_key_returns_unauthenticated() {
+        let (_tmp, state) = test_app_state().await;
+        state.auth.create_user(None, None, starpod_auth::Role::Admin).await.unwrap();
+
+        let app = build_router(Arc::clone(&state));
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/auth/verify")
+            .header("x-api-key", "sp_live_0000000000000000000000000000000000000000")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["authenticated"], false);
+    }
+
+    #[tokio::test]
+    async fn verify_valid_key_returns_user() {
+        let (_tmp, state) = test_app_state().await;
+        let user = state.auth.create_user(None, Some("Alice"), starpod_auth::Role::Admin).await.unwrap();
+        let key = state.auth.create_api_key(&user.id, None).await.unwrap();
+
+        let app = build_router(Arc::clone(&state));
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/auth/verify")
+            .header("x-api-key", &key.key)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["authenticated"], true);
+        assert_eq!(json["auth_disabled"], false);
+        assert_eq!(json["user"]["id"], user.id);
+        assert_eq!(json["user"]["display_name"], "Alice");
+        assert_eq!(json["user"]["role"], "admin");
+    }
+
     // ── IP filtering tests (existing) ───────────────────────────────────
 
     #[test]

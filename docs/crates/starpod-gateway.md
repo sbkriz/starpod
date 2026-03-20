@@ -5,8 +5,9 @@ Axum HTTP/WebSocket server with an embedded web UI.
 ## API
 
 ```rust
-// Start with a shared agent, config, optional notifier, and resolved paths
-starpod_gateway::serve_with_agent(agent, config, notifier, paths).await?;
+// Start with a shared agent, config, optional notifier, resolved paths,
+// and an optional pre-created auth store (None to create one internally)
+starpod_gateway::serve_with_agent(agent, config, notifier, paths, None).await?;
 
 // Build just the router (for testing or embedding)
 let router = starpod_gateway::build_router(state);
@@ -16,6 +17,7 @@ let router = starpod_gateway::build_router(state);
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/api/auth/verify` | Verify API key (never 401 — returns auth status as JSON) |
 | `POST` | `/api/chat` | Chat (non-streaming) |
 | `GET` | `/api/frame-check` | Check if a URL is frameable (X-Frame-Options / CSP) |
 | `GET` | `/api/sessions` | List sessions |
@@ -37,17 +39,21 @@ let router = starpod_gateway::build_router(state);
 
 ## Authentication
 
-Optional API key auth via `STARPOD_API_KEY` environment variable:
+Database-backed API key auth via `starpod-auth`. On first startup, an admin user and API key are bootstrapped automatically. If `STARPOD_API_KEY` is set, it is imported as the admin key for backward compatibility.
 
-- HTTP: `X-API-Key` header
-- WebSocket: `?token=` query parameter
+- **HTTP:** `X-API-Key` header
+- **WebSocket:** `?token=` query parameter
+- **Verify:** `GET /api/auth/verify` — returns `{ authenticated, auth_disabled, user }` (always 200, never 401)
+
+When no users exist yet (fresh install), all requests are allowed without a key.
 
 ## AppState
 
 ```rust
 pub struct AppState {
     pub agent: Arc<StarpodAgent>,
-    pub api_key: Option<String>,
+    pub auth: Arc<AuthStore>,
+    pub rate_limiter: Arc<RateLimiter>,
     pub config: RwLock<StarpodConfig>,
     pub paths: ResolvedPaths,
     pub events_tx: tokio::sync::broadcast::Sender<GatewayEvent>,

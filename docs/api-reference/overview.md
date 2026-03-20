@@ -10,26 +10,34 @@ http://localhost:3000/api
 
 ## Authentication
 
-Set the `STARPOD_API_KEY` environment variable to enable API key authentication.
+API key authentication is enabled automatically when the first admin user is bootstrapped on startup. Keys use the `sp_live_` prefix and are verified against argon2id hashes in the database.
 
 **HTTP requests** — include the key in the `X-API-Key` header:
 
 ```bash
-curl -H "X-API-Key: your-key" http://localhost:3000/api/health
+curl -H "X-API-Key: sp_live_..." http://localhost:3000/api/sessions
 ```
 
 **WebSocket** — pass the key as a query parameter:
 
 ```
-ws://localhost:3000/ws?token=your-key
+ws://localhost:3000/ws?token=sp_live_...
 ```
 
-If `STARPOD_API_KEY` is not set, the API is open (no auth required).
+**Verify** — check if a key is valid (never returns 401):
+
+```bash
+curl -H "X-API-Key: sp_live_..." http://localhost:3000/api/auth/verify
+# → { "authenticated": true, "auth_disabled": false, "user": { "id": "...", "role": "admin" } }
+```
+
+When no users exist yet (fresh install), all endpoints are accessible without a key.
 
 ## Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/api/auth/verify` | Verify API key validity |
 | `POST` | [`/api/chat`](/api-reference/chat) | Send a chat message |
 | `GET` | [`/api/sessions`](/api-reference/sessions#list-sessions) | List recent sessions |
 | `GET` | [`/api/sessions/:id`](/api-reference/sessions#get-session) | Get session metadata |
@@ -64,5 +72,7 @@ Errors return JSON with an appropriate HTTP status code:
 | Status | Meaning |
 |--------|---------|
 | `401` | Missing or invalid API key |
+| `403` | Forbidden (e.g. non-admin accessing settings) |
 | `404` | Resource not found |
+| `429` | Rate limit exceeded |
 | `500` | Internal server error |
