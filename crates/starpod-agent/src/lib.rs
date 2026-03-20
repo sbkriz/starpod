@@ -649,6 +649,7 @@ impl StarpodAgent {
                                 cache_write: u.cache_creation_input_tokens,
                                 cost_usd: result.total_cost_usd,
                                 model: config.model.clone(),
+                                user_id: message.user_id.clone().unwrap_or_else(|| "admin".into()),
                             },
                             result.num_turns,
                         ).await;
@@ -821,6 +822,7 @@ impl StarpodAgent {
         user_text: &str,
         result_text: &str,
         result: &agent_sdk::ResultMessage,
+        user_id: Option<&str>,
     ) {
         let config = self.snapshot_config();
 
@@ -834,6 +836,7 @@ impl StarpodAgent {
                     cache_write: u.cache_creation_input_tokens,
                     cost_usd: result.total_cost_usd,
                     model: config.model.clone(),
+                    user_id: user_id.unwrap_or("admin").to_string(),
                 },
                 result.num_turns,
             ).await;

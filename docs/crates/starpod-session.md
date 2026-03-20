@@ -30,6 +30,11 @@ let messages = mgr.get_messages(&id).await?;
 mgr.record_usage(&id, &usage_record, turn).await?;
 let summary = mgr.session_usage(&id).await?;
 
+// Cost overview (with optional time filter)
+let since = Some("2026-03-01T00:00:00Z");
+let overview = mgr.cost_overview(since).await?;
+// overview.total_cost_usd, overview.by_user, overview.by_model
+
 // Compaction logging
 mgr.record_compaction(&id, "auto", 150_000, "Summary text", 12).await?;
 
@@ -86,6 +91,7 @@ pub struct UsageRecord {
     pub cache_write: u64,
     pub cost_usd: f64,
     pub model: String,
+    pub user_id: String,
 }
 
 pub struct UsageSummary {
@@ -96,8 +102,33 @@ pub struct UsageSummary {
     pub total_cost_usd: f64,
     pub total_turns: u32,
 }
+
+pub struct CostOverview {
+    pub total_cost_usd: f64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_turns: u32,
+    pub by_user: Vec<UserCostSummary>,
+    pub by_model: Vec<ModelCostSummary>,
+}
+
+pub struct UserCostSummary {
+    pub user_id: String,
+    pub total_cost_usd: f64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_turns: u32,
+}
+
+pub struct ModelCostSummary {
+    pub model: String,
+    pub total_cost_usd: f64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_turns: u32,
+}
 ```
 
 ## Tests
 
-20+ unit tests covering channel resolution, time-gap auto-close, session isolation, usage tracking, compaction logging, closed session ID propagation, and read/unread state management.
+26 unit tests covering channel resolution, time-gap auto-close, session isolation, usage tracking, cost overview (by user, by model, time filtering), compaction logging, closed session ID propagation, and read/unread state management.
