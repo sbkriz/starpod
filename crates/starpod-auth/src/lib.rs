@@ -219,6 +219,18 @@ impl AuthStore {
         Ok(())
     }
 
+    /// Reactivate a previously deactivated user. Sets `is_active = true`.
+    pub async fn activate_user(&self, id: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        sqlx::query("UPDATE users SET is_active = 1, updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StarpodError::Auth(format!("Failed to activate user: {}", e)))?;
+        Ok(())
+    }
+
     // ── API Keys ─────────────────────────────────────────────────────────
 
     /// Create a new API key for a user. Returns the full key (shown only once).

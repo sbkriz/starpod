@@ -1,122 +1,373 @@
 import { useState, useEffect } from 'react'
 import { apiHeaders } from '../../lib/api'
-import { Textarea, SaveBar } from './fields'
 
 export default function UsersTab() {
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
-  const [newId, setNewId] = useState('')
+  const [error, setError] = useState(null)
+
+  // Create form
+  const [showCreate, setShowCreate] = useState(false)
+  const [newEmail, setNewEmail] = useState('')
+  const [newName, setNewName] = useState('')
+  const [newRole, setNewRole] = useState('user')
   const [creating, setCreating] = useState(false)
-  const [editId, setEditId] = useState(null)
-  const [editContent, setEditContent] = useState('')
+
+  // Expanded user
+  const [expandedId, setExpandedId] = useState(null)
+  const [editName, setEditName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editRole, setEditRole] = useState('user')
   const [editSaving, setEditSaving] = useState(false)
   const [editStatus, setEditStatus] = useState(null)
-  const [confirmDelete, setConfirmDelete] = useState(null)
-  const [error, setError] = useState(null)
+
+  // API keys
+  const [apiKeys, setApiKeys] = useState([])
+  const [keysLoading, setKeysLoading] = useState(false)
+  const [newKeyLabel, setNewKeyLabel] = useState('')
+  const [createdKey, setCreatedKey] = useState(null)
+  const [keyError, setKeyError] = useState(null)
 
   const load = async () => {
     try {
-      const r = await fetch('/api/settings/users', { headers: apiHeaders() })
+      const r = await fetch('/api/settings/auth/users', { headers: apiHeaders() })
       if (r.ok) setUsers((await r.json()) || [])
-    } catch { setError('Failed to load') }
+      else setError('Failed to load users')
+    } catch { setError('Failed to load users') }
     setLoading(false)
   }
 
   useEffect(() => { load() }, [])
 
   const create = async () => {
-    if (!newId.trim()) return
     setCreating(true); setError(null)
     try {
-      const r = await fetch('/api/settings/users', { method: 'POST', headers: apiHeaders(), body: JSON.stringify({ id: newId.trim() }) })
-      if (r.ok) { setNewId(''); await load() }
-      else { const d = await r.json().catch(() => ({})); setError(d.error || 'Failed') }
+      const body = { role: newRole }
+      if (newEmail.trim()) body.email = newEmail.trim()
+      if (newName.trim()) body.display_name = newName.trim()
+      const r = await fetch('/api/settings/auth/users', {
+        method: 'POST', headers: apiHeaders(), body: JSON.stringify(body),
+      })
+      if (r.ok) {
+        setNewEmail(''); setNewName(''); setNewRole('user'); setShowCreate(false)
+        await load()
+      } else {
+        const d = await r.json().catch(() => ({}))
+        setError(d.error || 'Failed to create user')
+      }
     } catch (e) { setError(e.message) }
     setCreating(false)
   }
 
-  const startEdit = async (uid) => {
-    if (editId === uid) { setEditId(null); return }
-    setEditId(uid); setEditStatus(null)
+  const expand = async (user) => {
+    if (expandedId === user.id) { setExpandedId(null); return }
+    setExpandedId(user.id)
+    setEditName(user.display_name || '')
+    setEditEmail(user.email || '')
+    setEditRole(user.role)
+    setEditStatus(null)
+    setCreatedKey(null)
+    setKeyError(null)
+    // Load API keys
+    setKeysLoading(true)
     try {
-      const r = await fetch(`/api/settings/users/${encodeURIComponent(uid)}`, { headers: apiHeaders() })
-      if (r.ok) { const d = await r.json(); setEditContent(d.user_md || d.content || '') }
-    } catch { setEditStatus({ type: 'error', text: 'Failed to load' }) }
+      const r = await fetch(`/api/settings/auth/users/${encodeURIComponent(user.id)}/api-keys`, { headers: apiHeaders() })
+      if (r.ok) setApiKeys((await r.json()) || [])
+    } catch {}
+    setKeysLoading(false)
   }
 
   const saveEdit = async () => {
     setEditSaving(true); setEditStatus(null)
     try {
-      const r = await fetch(`/api/settings/users/${encodeURIComponent(editId)}`, { method: 'PUT', headers: apiHeaders(), body: JSON.stringify({ content: editContent }) })
-      setEditStatus(r.ok ? { type: 'ok', text: 'Saved' } : { type: 'error', text: 'Failed' })
+      const body = { role: editRole }
+      if (editEmail.trim()) body.email = editEmail.trim()
+      if (editName.trim()) body.display_name = editName.trim()
+      const r = await fetch(`/api/settings/auth/users/${encodeURIComponent(expandedId)}`, {
+        method: 'PUT', headers: apiHeaders(), body: JSON.stringify(body),
+      })
+      if (r.ok) {
+        setEditStatus({ type: 'ok', text: 'Saved' })
+        await load()
+      } else {
+        const d = await r.json().catch(() => ({}))
+        setEditStatus({ type: 'error', text: d.error || 'Failed' })
+      }
     } catch (e) { setEditStatus({ type: 'error', text: e.message }) }
     setEditSaving(false)
   }
 
-  const doDelete = async (uid) => {
-    setConfirmDelete(null)
+  const toggleActive = async (user) => {
+    const action = user.is_active ? 'deactivate' : 'activate'
     try {
-      const r = await fetch(`/api/settings/users/${encodeURIComponent(uid)}`, { method: 'DELETE', headers: apiHeaders() })
-      if (r.ok) { if (editId === uid) setEditId(null); await load() }
-      else setError('Failed to delete')
+      const r = await fetch(`/api/settings/auth/users/${encodeURIComponent(user.id)}/${action}`, {
+        method: 'POST', headers: apiHeaders(),
+      })
+      if (r.ok) await load()
+      else {
+        const d = await r.json().catch(() => ({}))
+        setError(d.error || `Failed to ${action}`)
+      }
     } catch (e) { setError(e.message) }
+  }
+
+  const createApiKey = async () => {
+    setKeyError(null); setCreatedKey(null)
+    try {
+      const body = {}
+      if (newKeyLabel.trim()) body.label = newKeyLabel.trim()
+      const r = await fetch(`/api/settings/auth/users/${encodeURIComponent(expandedId)}/api-keys`, {
+        method: 'POST', headers: apiHeaders(), body: JSON.stringify(body),
+      })
+      if (r.ok) {
+        const data = await r.json()
+        setCreatedKey(data.key)
+        setNewKeyLabel('')
+        // Reload keys
+        const kr = await fetch(`/api/settings/auth/users/${encodeURIComponent(expandedId)}/api-keys`, { headers: apiHeaders() })
+        if (kr.ok) setApiKeys((await kr.json()) || [])
+      } else {
+        const d = await r.json().catch(() => ({}))
+        setKeyError(d.error || 'Failed to create key')
+      }
+    } catch (e) { setKeyError(e.message) }
+  }
+
+  const revokeKey = async (keyId) => {
+    try {
+      const r = await fetch(`/api/settings/auth/api-keys/${encodeURIComponent(keyId)}/revoke`, {
+        method: 'POST', headers: apiHeaders(),
+      })
+      if (r.ok) {
+        // Reload keys
+        const kr = await fetch(`/api/settings/auth/users/${encodeURIComponent(expandedId)}/api-keys`, { headers: apiHeaders() })
+        if (kr.ok) setApiKeys((await kr.json()) || [])
+      }
+    } catch {}
+  }
+
+  const copyKey = (key) => {
+    navigator.clipboard.writeText(key).catch(() => {})
   }
 
   if (loading) return <div className="text-dim text-sm py-8 text-center">Loading...</div>
 
   return (
     <>
-      {/* Create */}
-      <div className="flex gap-2 mb-4">
-        <input
-          type="text"
-          className="s-input font-mono text-xs flex-1"
-          value={newId}
-          onChange={e => setNewId(e.target.value)}
-          placeholder="user-id"
-          onKeyDown={e => e.key === 'Enter' && create()}
-        />
-        <button onClick={create} disabled={creating || !newId.trim()} className="s-save-btn whitespace-nowrap">
-          Create
+      {/* Header + create button */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-dim text-xs">{users.length} user{users.length !== 1 ? 's' : ''}</div>
+        <button
+          onClick={() => setShowCreate(!showCreate)}
+          className="s-save-btn text-xs"
+        >
+          {showCreate ? 'Cancel' : 'New user'}
         </button>
       </div>
 
       {error && <div className="text-err text-xs mb-3">{error}</div>}
 
+      {/* Create form */}
+      {showCreate && (
+        <div className="s-card mb-4">
+          <div className="s-card-body">
+            <div className="flex flex-col gap-2">
+              <input
+                type="text"
+                className="s-input text-xs"
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                placeholder="Display name"
+              />
+              <input
+                type="email"
+                className="s-input text-xs"
+                value={newEmail}
+                onChange={e => setNewEmail(e.target.value)}
+                placeholder="Email (optional)"
+              />
+              <div className="flex gap-2 items-center">
+                <select
+                  value={newRole}
+                  onChange={e => setNewRole(e.target.value)}
+                  className="s-input s-select text-xs flex-1"
+                >
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
+                <button onClick={create} disabled={creating} className="s-save-btn text-xs whitespace-nowrap">
+                  {creating ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* User list */}
       {users.length === 0 ? (
-        <div className="text-dim text-sm text-center py-8">No users</div>
+        <div className="text-dim text-sm text-center py-8">No users yet. Create one to get started.</div>
       ) : (
         <div className="flex flex-col gap-1.5">
           {users.map(u => (
             <div key={u.id} className="user-card">
-              <div className="flex items-center justify-between">
+              <div
+                className="flex items-center justify-between cursor-pointer"
+                onClick={() => expand(u)}
+              >
                 <div className="flex items-center gap-3">
-                  <span className="font-mono text-sm text-primary">{u.id}</span>
-                  <span className="text-dim text-xs">{u.daily_log_count ?? 0} logs</span>
+                  <span className="text-sm text-primary">
+                    {u.display_name || u.email || u.id.slice(0, 8)}
+                  </span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wider ${
+                    u.role === 'admin'
+                      ? 'bg-accent/10 text-accent'
+                      : 'bg-elevated text-muted'
+                  }`}>
+                    {u.role}
+                  </span>
+                  {!u.is_active && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-err/10 text-err font-medium uppercase tracking-wider">
+                      inactive
+                    </span>
+                  )}
                 </div>
-                <div className="flex gap-3">
-                  <button onClick={() => startEdit(u.id)} className="text-xs text-muted hover:text-primary transition-colors cursor-pointer">
-                    {editId === u.id ? 'close' : 'edit'}
-                  </button>
-                  <button onClick={() => setConfirmDelete(u.id)} className="text-xs text-muted hover:text-err transition-colors cursor-pointer">
-                    delete
-                  </button>
+                <div className="flex items-center gap-2">
+                  {u.email && <span className="text-dim text-xs hidden sm:inline">{u.email}</span>}
+                  <svg className={`w-3 h-3 text-muted transition-transform ${expandedId === u.id ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                  </svg>
                 </div>
               </div>
 
-              {editId === u.id && (
+              {/* Expanded panel */}
+              {expandedId === u.id && (
                 <div className="mt-3 pt-3 border-t border-border-subtle">
-                  <div className="font-mono text-[10px] text-dim mb-1.5 uppercase tracking-wider">USER.md</div>
-                  <Textarea value={editContent} onChange={setEditContent} rows={10} />
-                  <SaveBar onSave={saveEdit} saving={editSaving} status={editStatus} />
-                </div>
-              )}
+                  {/* Edit fields */}
+                  <div className="flex flex-col gap-2 mb-4">
+                    <div className="font-mono text-[10px] text-dim uppercase tracking-wider">Profile</div>
+                    <input
+                      type="text"
+                      className="s-input text-xs"
+                      value={editName}
+                      onChange={e => setEditName(e.target.value)}
+                      placeholder="Display name"
+                    />
+                    <input
+                      type="email"
+                      className="s-input text-xs"
+                      value={editEmail}
+                      onChange={e => setEditEmail(e.target.value)}
+                      placeholder="Email"
+                    />
+                    <div className="flex gap-2 items-center">
+                      <select
+                        value={editRole}
+                        onChange={e => setEditRole(e.target.value)}
+                        className="s-input s-select text-xs flex-1"
+                      >
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                      <button onClick={saveEdit} disabled={editSaving} className="s-save-btn text-xs">
+                        {editSaving ? 'Saving...' : 'Save'}
+                      </button>
+                      <button
+                        onClick={() => toggleActive(u)}
+                        className={`text-xs px-3 py-1 rounded cursor-pointer transition-colors ${
+                          u.is_active
+                            ? 'bg-err/10 text-err hover:bg-err/20'
+                            : 'bg-ok/10 text-ok hover:bg-ok/20'
+                        }`}
+                      >
+                        {u.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                    </div>
+                    {editStatus && (
+                      <span className={`text-xs ${editStatus.type === 'error' ? 'text-err' : 'text-ok'}`}>
+                        {editStatus.text}
+                      </span>
+                    )}
+                  </div>
 
-              {confirmDelete === u.id && (
-                <div className="mt-3 pt-3 border-t border-border-subtle flex items-center gap-3">
-                  <span className="text-xs text-err">Delete all data for this user?</span>
-                  <button onClick={() => doDelete(u.id)} className="text-xs bg-err/10 text-err px-3 py-1 rounded cursor-pointer hover:bg-err/20 transition-colors">Yes</button>
-                  <button onClick={() => setConfirmDelete(null)} className="text-xs text-muted hover:text-primary cursor-pointer transition-colors">Cancel</button>
+                  {/* API Keys */}
+                  <div className="pt-3 border-t border-border-subtle">
+                    <div className="font-mono text-[10px] text-dim uppercase tracking-wider mb-2">API Keys</div>
+
+                    {/* Created key banner */}
+                    {createdKey && (
+                      <div className="bg-ok/10 border border-ok/20 rounded p-3 mb-3">
+                        <div className="text-xs text-ok font-medium mb-1">Key created — copy it now, it won't be shown again</div>
+                        <div className="flex gap-2 items-center">
+                          <code className="text-xs font-mono text-primary bg-elevated px-2 py-1 rounded flex-1 break-all select-all">
+                            {createdKey}
+                          </code>
+                          <button
+                            onClick={() => copyKey(createdKey)}
+                            className="text-xs text-muted hover:text-primary cursor-pointer shrink-0"
+                          >
+                            copy
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {keyError && <div className="text-err text-xs mb-2">{keyError}</div>}
+
+                    {/* Create key */}
+                    <div className="flex gap-2 mb-3">
+                      <input
+                        type="text"
+                        className="s-input font-mono text-xs flex-1"
+                        value={newKeyLabel}
+                        onChange={e => setNewKeyLabel(e.target.value)}
+                        placeholder="Key label (optional)"
+                        onKeyDown={e => e.key === 'Enter' && createApiKey()}
+                      />
+                      <button onClick={createApiKey} className="s-save-btn text-xs whitespace-nowrap">
+                        Create key
+                      </button>
+                    </div>
+
+                    {/* Key list */}
+                    {keysLoading ? (
+                      <div className="text-dim text-xs">Loading keys...</div>
+                    ) : apiKeys.length === 0 ? (
+                      <div className="text-dim text-xs">No API keys</div>
+                    ) : (
+                      <div className="flex flex-col gap-1">
+                        {apiKeys.map(k => (
+                          <div key={k.id} className="flex items-center justify-between py-1.5 px-2 rounded bg-elevated/50">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <code className="text-xs font-mono text-muted">{k.prefix}...</code>
+                              {k.label && <span className="text-xs text-secondary truncate">{k.label}</span>}
+                              {k.revoked_at && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-err/10 text-err font-medium">revoked</span>
+                              )}
+                              {k.last_used_at && !k.revoked_at && (
+                                <span className="text-[10px] text-dim">
+                                  used {new Date(k.last_used_at).toLocaleDateString()}
+                                </span>
+                              )}
+                            </div>
+                            {!k.revoked_at && (
+                              <button
+                                onClick={() => revokeKey(k.id)}
+                                className="text-xs text-muted hover:text-err cursor-pointer transition-colors shrink-0 ml-2"
+                              >
+                                revoke
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* User ID (small, for reference) */}
+                  <div className="mt-3 pt-2 border-t border-border-subtle">
+                    <span className="text-[10px] text-dim font-mono select-all">{u.id}</span>
+                  </div>
                 </div>
               )}
             </div>

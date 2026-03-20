@@ -32,6 +32,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
+use starpod_auth::Role;
 use starpod_core::{FrontendConfig, FollowupMode, ReasoningEffort};
 
 use crate::routes::{authenticate_request, ErrorResponse};
@@ -164,6 +165,36 @@ struct UpdateSkillRequest {
     body: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct CreateAuthUserRequest {
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default = "default_role")]
+    role: Role,
+}
+
+fn default_role() -> Role {
+    Role::User
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateAuthUserRequest {
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    role: Option<Role>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateApiKeyRequest {
+    #[serde(default)]
+    label: Option<String>,
+}
+
 // ── Routes ──────────────────────────────────────────────────────────────
 
 /// Build the settings sub-router with all `/api/settings/*` routes.
@@ -185,6 +216,19 @@ pub fn settings_routes() -> Router<Arc<AppState>> {
             "/api/settings/skills/{name}",
             get(get_skill).put(update_skill).delete(delete_skill),
         )
+        // Auth user management
+        .route("/api/settings/auth/users", get(list_auth_users).post(create_auth_user))
+        .route(
+            "/api/settings/auth/users/{id}",
+            get(get_auth_user).put(update_auth_user),
+        )
+        .route("/api/settings/auth/users/{id}/deactivate", axum::routing::post(deactivate_auth_user))
+        .route("/api/settings/auth/users/{id}/activate", axum::routing::post(activate_auth_user))
+        .route(
+            "/api/settings/auth/users/{id}/api-keys",
+            get(list_auth_api_keys).post(create_auth_api_key),
+        )
+        .route("/api/settings/auth/api-keys/{id}/revoke", axum::routing::post(revoke_auth_api_key))
 }
 
 // ── General ─────────────────────────────────────────────────────────────
@@ -851,6 +895,200 @@ async fn delete_skill(
     let store = skill_store(&state)?;
     store.delete(&name).map_err(|e| bad_request(e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Auth user management ─────────────────────────────────────────────────
+
+/// Require admin role, returning a 403 if the user is not an admin.
+fn require_admin(user: &Option<starpod_auth::User>) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    if let Some(ref u) = user {
+        if u.role != Role::Admin {
+            return Err(err(StatusCode::FORBIDDEN, "Admin access required"));
+        }
+    }
+    Ok(())
+}
+
+async fn list_auth_users(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> ApiResult<Vec<starpod_auth::User>> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    state
+        .auth
+        .list_users()
+        .await
+        .map(Json)
+        .map_err(|e| internal(e))
+}
+
+async fn get_auth_user(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult<starpod_auth::User> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    state
+        .auth
+        .get_user(&id)
+        .await
+        .map_err(|e| internal(e))?
+        .map(Json)
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))
+}
+
+async fn create_auth_user(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<CreateAuthUserRequest>,
+) -> Result<(StatusCode, Json<starpod_auth::User>), (StatusCode, Json<ErrorResponse>)> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    let user = state
+        .auth
+        .create_user(req.email.as_deref(), req.display_name.as_deref(), req.role)
+        .await
+        .map_err(|e| internal(e))?;
+
+    Ok((StatusCode::CREATED, Json(user)))
+}
+
+async fn update_auth_user(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateAuthUserRequest>,
+) -> ApiResult<starpod_auth::User> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    // Verify user exists
+    state
+        .auth
+        .get_user(&id)
+        .await
+        .map_err(|e| internal(e))?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
+
+    state
+        .auth
+        .update_user(&id, req.email.as_deref(), req.display_name.as_deref(), req.role)
+        .await
+        .map_err(|e| internal(e))?;
+
+    // Return updated user
+    state
+        .auth
+        .get_user(&id)
+        .await
+        .map_err(|e| internal(e))?
+        .map(Json)
+        .ok_or_else(|| internal("User disappeared after update"))
+}
+
+async fn deactivate_auth_user(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult<serde_json::Value> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    // Prevent self-deactivation
+    if let Some(ref u) = auth_user {
+        if u.id == id {
+            return Err(bad_request("Cannot deactivate yourself"));
+        }
+    }
+
+    state
+        .auth
+        .deactivate_user(&id)
+        .await
+        .map_err(|e| internal(e))?;
+
+    Ok(ok_json())
+}
+
+async fn activate_auth_user(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult<serde_json::Value> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    state
+        .auth
+        .activate_user(&id)
+        .await
+        .map_err(|e| internal(e))?;
+
+    Ok(ok_json())
+}
+
+async fn list_auth_api_keys(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+) -> ApiResult<Vec<starpod_auth::ApiKeyMeta>> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    state
+        .auth
+        .list_api_keys(&user_id)
+        .await
+        .map(Json)
+        .map_err(|e| internal(e))
+}
+
+async fn create_auth_api_key(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+    Json(req): Json<CreateApiKeyRequest>,
+) -> Result<(StatusCode, Json<starpod_auth::ApiKeyCreated>), (StatusCode, Json<ErrorResponse>)> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    // Verify user exists
+    state
+        .auth
+        .get_user(&user_id)
+        .await
+        .map_err(|e| internal(e))?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
+
+    let created = state
+        .auth
+        .create_api_key(&user_id, req.label.as_deref())
+        .await
+        .map_err(|e| internal(e))?;
+
+    Ok((StatusCode::CREATED, Json(created)))
+}
+
+async fn revoke_auth_api_key(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(key_id): Path<String>,
+) -> ApiResult<serde_json::Value> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    state
+        .auth
+        .revoke_api_key(&key_id)
+        .await
+        .map_err(|e| internal(e))?;
+
+    Ok(ok_json())
 }
 
 // ── TOML helpers ────────────────────────────────────────────────────────
