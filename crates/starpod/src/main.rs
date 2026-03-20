@@ -1245,6 +1245,8 @@ async fn main() -> anyhow::Result<()> {
             println!("  {} {}", "Server".dimmed(), addr.bright_green());
             print_separator();
 
+            let _ = open::that(format!("http://{}", addr));
+
             starpod_gateway::serve_with_agent(agent, config, cron_notifier, paths).await?;
         }
 
@@ -1321,6 +1323,8 @@ async fn main() -> anyhow::Result<()> {
                 config.project_root.display().to_string().bright_white()
             );
             println!();
+
+            let _ = open::that(format!("http://{}", addr));
 
             starpod_gateway::serve_with_agent(agent, config, cron_notifier, paths).await?;
         }

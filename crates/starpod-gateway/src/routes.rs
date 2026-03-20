@@ -37,6 +37,7 @@ static RE_OG_TITLE2: LazyLock<Regex> = LazyLock::new(|| {
 /// Build API routes.
 pub fn api_routes() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/api/auth/verify", get(verify_handler))
         .route("/api/chat", post(chat_handler))
         .route("/api/frame-check", get(frame_check_handler))
         .route("/api/sessions", get(list_sessions_handler))
@@ -53,6 +54,58 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/api/instances/{id}/health", get(instance_health_handler))
         .route("/api/health", get(health_handler))
         .merge(crate::settings::settings_routes())
+}
+
+// ── Auth verify endpoint ─────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+struct VerifyResponse {
+    authenticated: bool,
+    /// `true` when the auth store has no users (fresh install — no key needed).
+    auth_disabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user: Option<VerifyUser>,
+}
+
+#[derive(Debug, Serialize)]
+struct VerifyUser {
+    id: String,
+    display_name: Option<String>,
+    role: String,
+}
+
+/// Check whether the provided API key is valid.
+///
+/// Returns 200 with `authenticated: true` on success, or `auth_disabled: true`
+/// when the instance has no users yet (pre-bootstrap). Returns 200 with
+/// `authenticated: false` when the key is missing or invalid — never 401 —
+/// so the frontend can distinguish "need to log in" from "server error".
+async fn verify_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Json<VerifyResponse> {
+    let has_users = state.auth.has_users().await.unwrap_or(false);
+    if !has_users {
+        return Json(VerifyResponse { authenticated: true, auth_disabled: true, user: None });
+    }
+
+    let key = headers.get("x-api-key").and_then(|v| v.to_str().ok());
+    let Some(key) = key else {
+        return Json(VerifyResponse { authenticated: false, auth_disabled: false, user: None });
+    };
+
+    match state.auth.authenticate_api_key(key).await {
+        Ok(Some(u)) => Json(VerifyResponse {
+            authenticated: true,
+            auth_disabled: false,
+            user: Some(VerifyUser {
+                id: u.id,
+                display_name: u.display_name,
+                role: format!("{:?}", u.role).to_lowercase(),
+            }),
+        }),
+        _ => Json(VerifyResponse { authenticated: false, auth_disabled: false, user: None }),
+    }
 }
 
 // ── Frame-check endpoint ─────────────────────────────────────────────────

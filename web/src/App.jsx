@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useCallback } from 'react'
 import './style.css'
 import { AppProvider, useApp, isMobile } from './contexts/AppContext'
 import { generateUUID } from './lib/utils'
+import AuthGate from './components/AuthGate'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import Chat from './components/Chat'
@@ -224,8 +225,10 @@ function AppInner() {
 
 export default function App() {
   return (
-    <AppProvider>
-      <AppInner />
-    </AppProvider>
+    <AuthGate>
+      <AppProvider>
+        <AppInner />
+      </AppProvider>
+    </AuthGate>
   )
 }
