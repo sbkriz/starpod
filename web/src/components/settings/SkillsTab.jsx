@@ -141,14 +141,18 @@ export default function SkillsTab() {
 
   return (
     <>
-      {/* Wizard / Create */}
-      {!wizardOpen ? (
-        <div className="mb-4">
-          <button onClick={openWizard} className="s-save-btn">
-            + New Skill
+      {/* Header + new skill button */}
+      {!wizardOpen && (
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-dim text-xs">{skills.length} skill{skills.length !== 1 ? 's' : ''}</div>
+          <button onClick={openWizard} className="s-save-btn text-xs">
+            New skill
           </button>
         </div>
-      ) : (
+      )}
+
+      {/* Wizard / Create */}
+      {wizardOpen && (
         <div className="mb-4 p-4 rounded-lg border border-border-subtle bg-elevated/50">
           <div className="flex items-center justify-between mb-3">
             <span className="font-mono text-xs text-dim uppercase tracking-wider">
