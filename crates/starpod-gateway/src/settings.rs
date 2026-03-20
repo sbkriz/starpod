@@ -102,6 +102,14 @@ struct CronSettings {
     default_max_retries: u32,
     default_timeout_secs: u64,
     max_concurrent_runs: usize,
+    heartbeat_interval_minutes: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct HeartbeatSettings {
+    enabled: bool,
+    interval_minutes: u32,
+    content: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -246,6 +254,7 @@ pub fn settings_routes() -> Router<Arc<AppState>> {
         .route("/api/settings/memory", get(get_memory).put(put_memory))
         .route("/api/settings/cron", get(get_cron).put(put_cron))
         .route("/api/settings/frontend", get(get_frontend).put(put_frontend))
+        .route("/api/settings/heartbeat", get(get_heartbeat).put(put_heartbeat))
         .route("/api/settings/files/{name}", get(get_file).put(put_file))
         .route("/api/settings/users", get(list_users).post(create_user))
         .route(
@@ -497,6 +506,7 @@ async fn get_cron(
         default_max_retries: cfg.cron.default_max_retries,
         default_timeout_secs: cfg.cron.default_timeout_secs,
         max_concurrent_runs: cfg.cron.max_concurrent_runs,
+        heartbeat_interval_minutes: cfg.cron.heartbeat_interval_minutes,
     }))
 }
 
@@ -525,6 +535,7 @@ async fn put_cron(
     cron.insert("default_max_retries".into(), toml::Value::Integer(settings.default_max_retries as i64));
     cron.insert("default_timeout_secs".into(), toml::Value::Integer(settings.default_timeout_secs as i64));
     cron.insert("max_concurrent_runs".into(), toml::Value::Integer(settings.max_concurrent_runs as i64));
+    cron.insert("heartbeat_interval_minutes".into(), toml::Value::Integer(settings.heartbeat_interval_minutes.max(1) as i64));
 
     write_agent_toml(&state, &doc)?;
     Ok(ok_json())
@@ -570,6 +581,100 @@ async fn put_frontend(
     let toml_str = toml::to_string_pretty(&cfg).map_err(|e| internal(e))?;
     let path = state.paths.config_dir.join("frontend.toml");
     std::fs::write(&path, toml_str).map_err(|e| internal(e))?;
+
+    Ok(ok_json())
+}
+
+// ── Heartbeat ────────────────────────────────────────────────────────────
+
+async fn get_heartbeat(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> ApiResult<HeartbeatSettings> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    if let Some(ref u) = auth_user {
+        if u.role != starpod_auth::Role::Admin {
+            return Err(err(StatusCode::FORBIDDEN, "Admin access required"));
+        }
+    }
+
+    let content = state.agent.memory().read_file("HEARTBEAT.md").unwrap_or_default();
+    let enabled = !content.trim().is_empty();
+    let cfg = state.config.read().unwrap();
+    let interval_minutes = cfg.cron.heartbeat_interval_minutes;
+
+    Ok(Json(HeartbeatSettings { enabled, interval_minutes, content }))
+}
+
+async fn put_heartbeat(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(settings): Json<HeartbeatSettings>,
+) -> ApiResult<serde_json::Value> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    if let Some(ref u) = auth_user {
+        if u.role != starpod_auth::Role::Admin {
+            return Err(err(StatusCode::FORBIDDEN, "Admin access required"));
+        }
+    }
+
+    // Save interval to config
+    let interval = settings.interval_minutes.max(1);
+    {
+        let mut doc = read_agent_toml(&state)?;
+        let table = doc.as_table_mut().ok_or_else(|| internal("agent.toml is not a table"))?;
+        let cron = table
+            .entry("cron")
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+            .as_table_mut()
+            .ok_or_else(|| internal("[cron] is not a table"))?;
+        cron.insert("heartbeat_interval_minutes".into(), toml::Value::Integer(interval as i64));
+        write_agent_toml(&state, &doc)?;
+    }
+
+    if settings.enabled {
+        // Save content and ensure cron job exists
+        let content = if settings.content.trim().is_empty() {
+            // Enabled but no content — keep a placeholder so the job stays alive
+            return Err(bad_request("Heartbeat content cannot be empty when enabled"));
+        } else {
+            settings.content
+        };
+
+        state.agent.memory().write_file("HEARTBEAT.md", &content).await.map_err(|e| internal(e))?;
+
+        // Create the cron job if it doesn't exist
+        let cron_store = state.agent.cron();
+        if cron_store.get_job_by_name("__heartbeat__").await.map_err(|e| internal(e))?.is_none() {
+            let resolved_tz = state.config.read().unwrap().resolved_timezone();
+            let schedule = starpod_cron::Schedule::Cron {
+                expr: format!("0 */{interval} * * * *"),
+            };
+            cron_store.add_job_full(
+                "__heartbeat__", &content, &schedule,
+                false, resolved_tz.as_deref(), 3, 7200,
+                starpod_cron::SessionMode::Main, None,
+            ).await.map_err(|e| internal(e))?;
+        } else {
+            // Update the schedule if the interval changed
+            let job = cron_store.get_job_by_name("__heartbeat__").await.map_err(|e| internal(e))?.unwrap();
+            let new_schedule = starpod_cron::Schedule::Cron {
+                expr: format!("0 */{interval} * * * *"),
+            };
+            let update = starpod_cron::JobUpdate {
+                schedule: Some(new_schedule),
+                ..Default::default()
+            };
+            cron_store.update_job(&job.id, &update).await.map_err(|e| internal(e))?;
+        }
+    } else {
+        // Disabled: clear the file and remove the cron job
+        state.agent.memory().write_file("HEARTBEAT.md", "").await.map_err(|e| internal(e))?;
+
+        let cron_store = state.agent.cron();
+        // Remove the job if it exists (ignore errors — may not exist)
+        let _ = cron_store.remove_job_by_name("__heartbeat__").await;
+    }
 
     Ok(ok_json())
 }
@@ -1855,6 +1960,7 @@ mod tests {
             default_max_retries: 5,
             default_timeout_secs: 3600,
             max_concurrent_runs: 2,
+            heartbeat_interval_minutes: 15,
         };
         let json = serde_json::to_string(&settings).unwrap();
         let back: CronSettings = serde_json::from_str(&json).unwrap();
@@ -2034,7 +2140,7 @@ mod tests {
             Arc::clone(&state),
             "/api/settings/cron",
             serde_json::json!({
-                "default_max_retries": 5, "default_timeout_secs": 3600, "max_concurrent_runs": 4
+                "default_max_retries": 5, "default_timeout_secs": 3600, "max_concurrent_runs": 4, "heartbeat_interval_minutes": 15
             }),
         ).await;
         assert_eq!(status, StatusCode::OK);
@@ -2042,6 +2148,101 @@ mod tests {
         let content = std::fs::read_to_string(&state.paths.agent_toml).unwrap();
         let parsed: toml::Value = toml::from_str(&content).unwrap();
         assert_eq!(parsed["cron"]["default_max_retries"].as_integer(), Some(5));
+    }
+
+    // ── Heartbeat settings tests ─────────────────────────────────────────
+
+    #[test]
+    fn heartbeat_settings_round_trip() {
+        let settings = HeartbeatSettings {
+            enabled: true,
+            interval_minutes: 15,
+            content: "Check for new tasks".into(),
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let back: HeartbeatSettings = serde_json::from_str(&json).unwrap();
+        assert!(back.enabled);
+        assert_eq!(back.interval_minutes, 15);
+        assert_eq!(back.content, "Check for new tasks");
+    }
+
+    #[tokio::test]
+    async fn get_heartbeat_returns_disabled_when_empty() {
+        let (_tmp, state) = test_app_state().await;
+        let (status, json) = get_json(state, "/api/settings/heartbeat").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["enabled"], false);
+        assert_eq!(json["interval_minutes"], 30); // default
+        assert_eq!(json["content"], "");
+    }
+
+    #[tokio::test]
+    async fn put_heartbeat_enable_and_disable() {
+        let (_tmp, state) = test_app_state().await;
+
+        // Enable heartbeat
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/heartbeat",
+            serde_json::json!({
+                "enabled": true,
+                "interval_minutes": 15,
+                "content": "Do something"
+            }),
+        ).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Verify it reads back as enabled
+        let (status, json) = get_json(Arc::clone(&state), "/api/settings/heartbeat").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["enabled"], true);
+        assert_eq!(json["content"], "Do something");
+
+        // Verify interval was persisted to TOML
+        let content = std::fs::read_to_string(&state.paths.agent_toml).unwrap();
+        let parsed: toml::Value = toml::from_str(&content).unwrap();
+        assert_eq!(parsed["cron"]["heartbeat_interval_minutes"].as_integer(), Some(15));
+
+        // Verify cron job was created
+        let job = state.agent.cron().get_job_by_name("__heartbeat__").await.unwrap();
+        assert!(job.is_some());
+
+        // Disable heartbeat
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/heartbeat",
+            serde_json::json!({
+                "enabled": false,
+                "interval_minutes": 15,
+                "content": ""
+            }),
+        ).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Verify it reads back as disabled
+        let (status, json) = get_json(Arc::clone(&state), "/api/settings/heartbeat").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["enabled"], false);
+
+        // Verify cron job was removed
+        let job = state.agent.cron().get_job_by_name("__heartbeat__").await.unwrap();
+        assert!(job.is_none());
+    }
+
+    #[tokio::test]
+    async fn put_heartbeat_enabled_empty_content_rejected() {
+        let (_tmp, state) = test_app_state().await;
+        let (status, json) = put_json(
+            state,
+            "/api/settings/heartbeat",
+            serde_json::json!({
+                "enabled": true,
+                "interval_minutes": 30,
+                "content": "   "
+            }),
+        ).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(json["error"].as_str().unwrap().contains("empty"));
     }
 
     #[tokio::test]

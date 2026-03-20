@@ -1088,11 +1088,11 @@ async fn ensure_heartbeat(
         }
     };
 
-    // Create heartbeat job: every 30 minutes, main session
-    let schedule = starpod_cron::Schedule::Cron {
-        expr: "0 */30 * * * *".to_string(),
-    };
     let config = agent.config();
+    let interval = config.cron.heartbeat_interval_minutes.max(1);
+    let schedule = starpod_cron::Schedule::Cron {
+        expr: format!("0 */{interval} * * * *"),
+    };
     let resolved_tz = config.resolved_timezone();
     let user_tz = resolved_tz.as_deref();
     store
@@ -1109,7 +1109,7 @@ async fn ensure_heartbeat(
         )
         .await?;
 
-    info!("Created __heartbeat__ cron job (every 30 minutes)");
+    info!(interval_minutes = interval, "Created __heartbeat__ cron job");
     Ok(())
 }
 
