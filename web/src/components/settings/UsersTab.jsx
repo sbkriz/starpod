@@ -28,6 +28,14 @@ export default function UsersTab() {
   const [createdKey, setCreatedKey] = useState(null)
   const [keyError, setKeyError] = useState(null)
 
+  // Telegram link
+  const [telegramLink, setTelegramLink] = useState(null)
+  const [telegramLoading, setTelegramLoading] = useState(false)
+  const [newTelegramId, setNewTelegramId] = useState('')
+  const [newTelegramUsername, setNewTelegramUsername] = useState('')
+  const [telegramError, setTelegramError] = useState(null)
+  const [telegramEnabled, setTelegramEnabled] = useState(false)
+
   const load = async () => {
     try {
       const r = await fetch('/api/settings/auth/users', { headers: apiHeaders() })
@@ -37,7 +45,13 @@ export default function UsersTab() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    fetch('/api/settings/channels', { headers: apiHeaders() })
+      .then(r => r.json())
+      .then(d => setTelegramEnabled(d?.telegram?.enabled ?? false))
+      .catch(() => {})
+  }, [])
 
   const create = async () => {
     setCreating(true); setError(null)
@@ -68,6 +82,10 @@ export default function UsersTab() {
     setEditStatus(null)
     setCreatedKey(null)
     setKeyError(null)
+    setTelegramLink(null)
+    setTelegramError(null)
+    setNewTelegramId('')
+    setNewTelegramUsername('')
     // Load API keys
     setKeysLoading(true)
     try {
@@ -75,6 +93,18 @@ export default function UsersTab() {
       if (r.ok) setApiKeys((await r.json()) || [])
     } catch {}
     setKeysLoading(false)
+    // Load telegram link
+    if (telegramEnabled) {
+      setTelegramLoading(true)
+      try {
+        const tr = await fetch(`/api/settings/auth/users/${encodeURIComponent(user.id)}/telegram`, { headers: apiHeaders() })
+        if (tr.ok) {
+          const data = await tr.json()
+          setTelegramLink(data.telegram_id ? data : null)
+        }
+      } catch {}
+      setTelegramLoading(false)
+    }
   }
 
   const saveEdit = async () => {
@@ -148,6 +178,41 @@ export default function UsersTab() {
 
   const copyKey = (key) => {
     navigator.clipboard.writeText(key).catch(() => {})
+  }
+
+  const linkTelegram = async () => {
+    setTelegramError(null)
+    const tid = parseInt(newTelegramId, 10)
+    if (!tid || isNaN(tid)) { setTelegramError('Invalid Telegram ID'); return }
+    try {
+      const body = { telegram_id: tid }
+      if (newTelegramUsername.trim()) body.username = newTelegramUsername.trim()
+      const r = await fetch(`/api/settings/auth/users/${encodeURIComponent(expandedId)}/telegram`, {
+        method: 'PUT', headers: apiHeaders(), body: JSON.stringify(body),
+      })
+      if (r.ok) {
+        const data = await r.json()
+        setTelegramLink(data)
+        setNewTelegramId(''); setNewTelegramUsername('')
+      } else {
+        const d = await r.json().catch(() => ({}))
+        setTelegramError(d.error || 'Failed to link')
+      }
+    } catch (e) { setTelegramError(e.message) }
+  }
+
+  const unlinkTelegram = async () => {
+    setTelegramError(null)
+    try {
+      const r = await fetch(`/api/settings/auth/users/${encodeURIComponent(expandedId)}/telegram`, {
+        method: 'DELETE', headers: apiHeaders(),
+      })
+      if (r.ok) setTelegramLink(null)
+      else {
+        const d = await r.json().catch(() => ({}))
+        setTelegramError(d.error || 'Failed to unlink')
+      }
+    } catch (e) { setTelegramError(e.message) }
   }
 
   if (loading) return <div className="text-dim text-sm py-8 text-center">Loading...</div>
@@ -363,6 +428,52 @@ export default function UsersTab() {
                       </div>
                     )}
                   </div>
+
+                  {/* Telegram Link */}
+                  {telegramEnabled && (
+                    <div className="pt-3 border-t border-border-subtle">
+                      <div className="font-mono text-[10px] text-dim uppercase tracking-wider mb-2">Telegram</div>
+
+                      {telegramError && <div className="text-err text-xs mb-2">{telegramError}</div>}
+
+                      {telegramLoading ? (
+                        <div className="text-dim text-xs">Loading...</div>
+                      ) : telegramLink ? (
+                        <div className="flex items-center justify-between py-1.5 px-2 rounded bg-elevated/50">
+                          <div className="flex items-center gap-2">
+                            <code className="text-xs font-mono text-primary">{telegramLink.telegram_id}</code>
+                            {telegramLink.username && <span className="text-xs text-secondary">@{telegramLink.username}</span>}
+                          </div>
+                          <button
+                            onClick={unlinkTelegram}
+                            className="text-xs text-muted hover:text-err cursor-pointer transition-colors"
+                          >
+                            unlink
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            className="s-input font-mono text-xs flex-1"
+                            value={newTelegramId}
+                            onChange={e => setNewTelegramId(e.target.value)}
+                            placeholder="Telegram ID"
+                          />
+                          <input
+                            type="text"
+                            className="s-input text-xs flex-1"
+                            value={newTelegramUsername}
+                            onChange={e => setNewTelegramUsername(e.target.value)}
+                            placeholder="Username (optional)"
+                          />
+                          <button onClick={linkTelegram} className="s-save-btn text-xs whitespace-nowrap">
+                            Link
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* User ID (small, for reference) */}
                   <div className="mt-3 pt-2 border-t border-border-subtle">

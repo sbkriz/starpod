@@ -17,9 +17,9 @@ provider = "anthropic"            # Active LLM provider
 model = "claude-haiku-4-5"        # Model name
 max_turns = 30                    # Max agentic turns per chat
 max_tokens = 16384                # Max tokens for LLM API responses
-server_addr = "127.0.0.1:3000"   # HTTP/WS server bind address
+server_addr = "127.0.0.1:3000"    # HTTP/WS server bind address
 agent_name = "Aster"              # Agent display name (personality in SOUL.md)
-# timezone = "America/New_York"   # IANA timezone for cron scheduling
+# timezone = "Europe/Rome"        # IANA timezone for cron scheduling
 
 # Extended thinking (optional)
 # reasoning_effort = "medium"     # "low", "medium", or "high"
@@ -141,16 +141,27 @@ Never commit API keys to version control. Store them in `.env` files (which are 
 
 ## Telegram Settings
 
-Telegram settings live in `agent.toml` under `[channels.telegram]`:
+Telegram settings live in `agent.toml` under `[channels.telegram]` and can also be managed from the **Settings > Channels** tab in the web UI.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `enabled` | bool | `true` | Enable/disable the Telegram channel |
 | `gap_minutes` | integer | `360` | Inactivity gap (minutes) before new session |
-| `allowed_users` | array | `[]` | User IDs and/or usernames allowed to chat |
 | `stream_mode` | string | `"final_only"` | `"final_only"` or `"all_messages"` |
 
 The bot token must be set via the `TELEGRAM_BOT_TOKEN` environment variable (or `.env` file), not in config.
+
+### Telegram User Linking
+
+Telegram access is controlled via user-level linking in the **Settings > Users** tab. Expand a user and use the **Telegram** section to link their Telegram ID to their Starpod user account. This replaces the old `allowed_users` config-file approach with database-backed per-user management.
+
+API endpoints for Telegram linking:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/settings/auth/users/:id/telegram` | Get user's Telegram link |
+| `PUT` | `/api/settings/auth/users/:id/telegram` | Link Telegram ID to user |
+| `DELETE` | `/api/settings/auth/users/:id/telegram` | Unlink Telegram from user |
 
 ## Attachments
 

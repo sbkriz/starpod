@@ -6,6 +6,7 @@ import MemoryTab from './MemoryTab'
 import CronTab from './CronTab'
 import SkillsTab from './SkillsTab'
 import UsersTab from './UsersTab'
+import ChannelsTab from './ChannelsTab'
 
 const tabGroups = [
   {
@@ -29,6 +30,7 @@ const tabGroups = [
     tabs: [
       { id: 'memory', label: 'Memory' },
       { id: 'cron', label: 'Cron' },
+      { id: 'channels', label: 'Channels' },
       { id: 'skills', label: 'Skills' },
       { id: 'users', label: 'Users' },
     ],
@@ -47,6 +49,7 @@ function TabContent({ tab }) {
     case 'frontend': return <FrontendTab />
     case 'memory': return <MemoryTab />
     case 'cron': return <CronTab />
+    case 'channels': return <ChannelsTab />
     case 'skills': return <SkillsTab />
     case 'users': return <UsersTab />
     default: return null

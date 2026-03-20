@@ -478,6 +478,34 @@ impl AuthStore {
         Ok(row.map(|r| row_to_user(&r)))
     }
 
+    /// Get the Telegram link for a specific user.
+    pub async fn get_telegram_link_for_user(&self, user_id: &str) -> Result<Option<TelegramLink>> {
+        let row = sqlx::query(
+            "SELECT telegram_id, user_id, username, linked_at FROM telegram_links WHERE user_id = ?"
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| StarpodError::Auth(format!("Failed to get Telegram link: {}", e)))?;
+
+        Ok(row.map(|r| TelegramLink {
+            telegram_id: r.get("telegram_id"),
+            user_id: r.get("user_id"),
+            username: r.get("username"),
+            linked_at: parse_dt(r.get("linked_at")),
+        }))
+    }
+
+    /// Unlink a Telegram account by user ID.
+    pub async fn unlink_telegram_by_user(&self, user_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM telegram_links WHERE user_id = ?")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StarpodError::Auth(format!("Failed to unlink Telegram: {}", e)))?;
+        Ok(())
+    }
+
     /// List all Telegram links.
     pub async fn list_telegram_links(&self) -> Result<Vec<TelegramLink>> {
         let rows = sqlx::query(
@@ -1090,6 +1118,36 @@ mod tests {
 
         let count = store.migrate_file_users(dir.path()).await.unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn get_telegram_link_for_user() {
+        let store = test_store().await;
+        let user = store.create_user(None, Some("Alice"), Role::User).await.unwrap();
+        store.link_telegram(&user.id, 12345, Some("alice")).await.unwrap();
+
+        let link = store.get_telegram_link_for_user(&user.id).await.unwrap().unwrap();
+        assert_eq!(link.telegram_id, 12345);
+        assert_eq!(link.username.as_deref(), Some("alice"));
+    }
+
+    #[tokio::test]
+    async fn get_telegram_link_for_user_none() {
+        let store = test_store().await;
+        let user = store.create_user(None, None, Role::User).await.unwrap();
+        let link = store.get_telegram_link_for_user(&user.id).await.unwrap();
+        assert!(link.is_none());
+    }
+
+    #[tokio::test]
+    async fn unlink_telegram_by_user() {
+        let store = test_store().await;
+        let user = store.create_user(None, None, Role::User).await.unwrap();
+        store.link_telegram(&user.id, 999, None).await.unwrap();
+
+        store.unlink_telegram_by_user(&user.id).await.unwrap();
+        let result = store.authenticate_telegram(999).await.unwrap();
+        assert!(result.is_none());
     }
 
     #[test]

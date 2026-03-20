@@ -52,6 +52,18 @@ When no users exist yet (fresh install), all endpoints are accessible without a 
 | `POST` | [`/api/instances/:id/restart`](/api-reference/instances#restart-instance) | Restart an instance |
 | `GET` | [`/api/instances/:id/health`](/api-reference/instances#instance-health) | Instance health info |
 | `GET` | [`/api/health`](/api-reference/health) | Health check |
+| `GET/PUT` | `/api/settings/general` | General config (model, provider, limits) |
+| `GET` | `/api/settings/models` | Well-known models per provider |
+| `GET/PUT` | `/api/settings/memory` | Memory settings |
+| `GET/PUT` | `/api/settings/cron` | Cron settings |
+| `GET/PUT` | `/api/settings/channels` | Channel settings (Telegram enabled, gap, stream mode) |
+| `GET/PUT` | `/api/settings/frontend` | Frontend config (greeting, prompts) |
+| `GET/PUT` | `/api/settings/files/:name` | Agent personality files (SOUL.md, etc.) |
+| `GET/POST` | `/api/settings/auth/users` | List / create auth users |
+| `GET/PUT` | `/api/settings/auth/users/:id` | Get / update auth user |
+| `GET/PUT/DELETE` | `/api/settings/auth/users/:id/telegram` | Per-user Telegram linking |
+| `GET/POST` | `/api/settings/auth/users/:id/api-keys` | User API key management |
+| `POST` | `/api/settings/auth/api-keys/:id/revoke` | Revoke an API key |
 
 ## WebSocket
 

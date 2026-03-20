@@ -33,6 +33,17 @@ let router = starpod_gateway::build_router(state);
 | `POST` | `/api/instances/:id/restart` | Restart an instance |
 | `GET` | `/api/instances/:id/health` | Instance health info |
 | `GET` | `/api/health` | Health check |
+| `GET/PUT` | `/api/settings/general` | General config (model, provider, etc.) |
+| `GET` | `/api/settings/models` | Well-known models per provider |
+| `GET/PUT` | `/api/settings/memory` | Memory settings |
+| `GET/PUT` | `/api/settings/cron` | Cron settings |
+| `GET/PUT` | `/api/settings/channels` | Channel settings (Telegram) |
+| `GET/PUT` | `/api/settings/frontend` | Frontend config (greeting, prompts) |
+| `GET/PUT` | `/api/settings/files/:name` | Agent personality files (SOUL.md, etc.) |
+| `GET/POST` | `/api/settings/auth/users` | Auth user CRUD |
+| `GET/PUT` | `/api/settings/auth/users/:id` | Auth user detail |
+| `GET/PUT/DELETE` | `/api/settings/auth/users/:id/telegram` | Per-user Telegram linking |
+| `GET/POST` | `/api/settings/auth/users/:id/api-keys` | User API key management |
 | `GET` | `/ws` | WebSocket streaming |
 | `GET` | `/docs`, `/docs/*` | Embedded documentation site |
 | `GET` | `/` | Embedded web UI (SPA fallback) |

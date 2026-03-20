@@ -210,6 +210,27 @@ struct CreateApiKeyRequest {
     label: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct ChannelsSettings {
+    telegram: TelegramChannelSettings,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TelegramChannelSettings {
+    enabled: bool,
+    #[serde(default)]
+    gap_minutes: Option<i64>,
+    #[serde(default)]
+    stream_mode: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LinkTelegramRequest {
+    telegram_id: i64,
+    #[serde(default)]
+    username: Option<String>,
+}
+
 // ── Routes ──────────────────────────────────────────────────────────────
 
 /// Build the settings sub-router with all `/api/settings/*` routes.
@@ -245,6 +266,13 @@ pub fn settings_routes() -> Router<Arc<AppState>> {
             get(list_auth_api_keys).post(create_auth_api_key),
         )
         .route("/api/settings/auth/api-keys/{id}/revoke", axum::routing::post(revoke_auth_api_key))
+        // Channels
+        .route("/api/settings/channels", get(get_channels).put(put_channels))
+        // Telegram linking per user
+        .route(
+            "/api/settings/auth/users/{id}/telegram",
+            get(get_user_telegram).put(put_user_telegram).delete(delete_user_telegram),
+        )
 }
 
 // ── General ─────────────────────────────────────────────────────────────
@@ -1233,6 +1261,136 @@ async fn revoke_auth_api_key(
     Ok(ok_json())
 }
 
+// ── Channels ────────────────────────────────────────────────────────────
+
+async fn get_channels(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> ApiResult<ChannelsSettings> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    let cfg = state.config.read().unwrap();
+    let tg = cfg.channels.telegram.clone().unwrap_or_default();
+    Ok(Json(ChannelsSettings {
+        telegram: TelegramChannelSettings {
+            enabled: tg.enabled,
+            gap_minutes: tg.gap_minutes,
+            stream_mode: Some(tg.stream_mode),
+        },
+    }))
+}
+
+async fn put_channels(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(settings): Json<ChannelsSettings>,
+) -> ApiResult<serde_json::Value> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    let mut doc = read_agent_toml(&state)?;
+    let table = doc.as_table_mut().ok_or_else(|| internal("agent.toml is not a table"))?;
+
+    let channels = table
+        .entry("channels")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .ok_or_else(|| internal("channels is not a table"))?;
+
+    let tg = channels
+        .entry("telegram")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .ok_or_else(|| internal("channels.telegram is not a table"))?;
+
+    tg.insert("enabled".into(), toml::Value::Boolean(settings.telegram.enabled));
+    if let Some(gap) = settings.telegram.gap_minutes {
+        tg.insert("gap_minutes".into(), toml::Value::Integer(gap));
+    } else {
+        tg.remove("gap_minutes");
+    }
+    if let Some(ref mode) = settings.telegram.stream_mode {
+        tg.insert("stream_mode".into(), toml::Value::String(mode.clone()));
+    }
+
+    write_agent_toml(&state, &doc)?;
+    Ok(ok_json())
+}
+
+// ── Telegram linking ────────────────────────────────────────────────────
+
+async fn get_user_telegram(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+) -> ApiResult<serde_json::Value> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    let link = state
+        .auth
+        .get_telegram_link_for_user(&user_id)
+        .await
+        .map_err(|e| internal(e))?;
+
+    match link {
+        Some(l) => Ok(Json(serde_json::json!({
+            "telegram_id": l.telegram_id,
+            "username": l.username,
+            "linked_at": l.linked_at.to_rfc3339(),
+        }))),
+        None => Ok(Json(serde_json::json!({}))),
+    }
+}
+
+async fn put_user_telegram(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+    Json(req): Json<LinkTelegramRequest>,
+) -> ApiResult<serde_json::Value> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    // Verify user exists
+    state
+        .auth
+        .get_user(&user_id)
+        .await
+        .map_err(|e| internal(e))?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
+
+    let link = state
+        .auth
+        .link_telegram(&user_id, req.telegram_id, req.username.as_deref())
+        .await
+        .map_err(|e| internal(e))?;
+
+    Ok(Json(serde_json::json!({
+        "telegram_id": link.telegram_id,
+        "username": link.username,
+        "linked_at": link.linked_at.to_rfc3339(),
+    })))
+}
+
+async fn delete_user_telegram(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+) -> ApiResult<serde_json::Value> {
+    let auth_user = authenticate_request(&state, &headers).await?;
+    require_admin(&auth_user)?;
+
+    state
+        .auth
+        .unlink_telegram_by_user(&user_id)
+        .await
+        .map_err(|e| internal(e))?;
+
+    Ok(ok_json())
+}
+
 // ── TOML helpers ────────────────────────────────────────────────────────
 
 fn read_agent_toml(state: &AppState) -> Result<toml::Value, (StatusCode, Json<ErrorResponse>)> {
@@ -1318,8 +1476,9 @@ mod tests {
             config_dir,
             db_dir,
             skills_dir,
-            project_root: tmp.path().to_path_buf(),
+            project_root: tmp.path().join("home"),
             instance_root: tmp.path().to_path_buf(),
+            home_dir: tmp.path().join("home"),
             users_dir,
             env_file: None,
         };
@@ -2220,5 +2379,177 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    // ── Channels ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn get_channels_returns_defaults() {
+        let (_tmp, state) = test_app_state().await;
+        let (status, json) = get_json(state, "/api/settings/channels").await;
+        assert_eq!(status, StatusCode::OK);
+        // No [channels.telegram] in test config → defaults (enabled: true by default)
+        assert_eq!(json["telegram"]["enabled"], true);
+        assert_eq!(json["telegram"]["gap_minutes"], 360);
+        assert_eq!(json["telegram"]["stream_mode"], "final_only");
+    }
+
+    #[tokio::test]
+    async fn put_channels_updates_toml() {
+        let (_tmp, state) = test_app_state().await;
+        let body = serde_json::json!({
+            "telegram": {
+                "enabled": true,
+                "gap_minutes": 120,
+                "stream_mode": "all_messages"
+            }
+        });
+        let (status, _) = put_json(Arc::clone(&state), "/api/settings/channels", body).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Verify it was written to the file
+        let content = std::fs::read_to_string(&state.paths.agent_toml).unwrap();
+        let parsed: toml::Value = toml::from_str(&content).unwrap();
+        assert_eq!(parsed["channels"]["telegram"]["enabled"].as_bool(), Some(true));
+        assert_eq!(parsed["channels"]["telegram"]["gap_minutes"].as_integer(), Some(120));
+        assert_eq!(parsed["channels"]["telegram"]["stream_mode"].as_str(), Some("all_messages"));
+    }
+
+    #[tokio::test]
+    async fn put_channels_preserves_other_sections() {
+        let (_tmp, state) = test_app_state().await;
+        // Verify existing config is preserved after writing channels
+        let (_, before) = get_json(Arc::clone(&state), "/api/settings/general").await;
+        let body = serde_json::json!({
+            "telegram": { "enabled": true, "gap_minutes": 60, "stream_mode": "final_only" }
+        });
+        put_json(Arc::clone(&state), "/api/settings/channels", body).await;
+        let (_, after) = get_json(state, "/api/settings/general").await;
+        assert_eq!(before["model"], after["model"]);
+        assert_eq!(before["agent_name"], after["agent_name"]);
+    }
+
+    // ── Telegram linking ────────────────────────────────────────────────
+
+    /// Helper: make an authenticated GET request with API key header.
+    async fn get_json_authed(state: Arc<AppState>, path: &str, key: &str) -> (StatusCode, serde_json::Value) {
+        let app = build_router(state);
+        let req = Request::builder()
+            .method("GET")
+            .uri(path)
+            .header("x-api-key", key)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let status = resp.status();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+        (status, json)
+    }
+
+    /// Helper: make an authenticated PUT request with API key header.
+    async fn put_json_authed(state: Arc<AppState>, path: &str, key: &str, body: serde_json::Value) -> (StatusCode, serde_json::Value) {
+        let app = build_router(state);
+        let req = Request::builder()
+            .method("PUT")
+            .uri(path)
+            .header("content-type", "application/json")
+            .header("x-api-key", key)
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let status = resp.status();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+        (status, json)
+    }
+
+    /// Helper: make an authenticated DELETE request with API key header.
+    async fn delete_authed(state: Arc<AppState>, path: &str, key: &str) -> StatusCode {
+        let app = build_router(state);
+        let req = Request::builder()
+            .method("DELETE")
+            .uri(path)
+            .header("x-api-key", key)
+            .body(Body::empty())
+            .unwrap();
+        app.oneshot(req).await.unwrap().status()
+    }
+
+    #[tokio::test]
+    async fn telegram_link_crud() {
+        let (_tmp, state) = test_app_state().await;
+        // Create an admin user with API key (this enables auth)
+        let admin = state.auth.create_user(None, Some("Admin"), starpod_auth::Role::Admin).await.unwrap();
+        let admin_key = state.auth.create_api_key(&admin.id, None).await.unwrap();
+        let key = &admin_key.key;
+        // Create a regular user to link
+        let user = state.auth.create_user(None, Some("Alice"), starpod_auth::Role::User).await.unwrap();
+        let uid = user.id.clone();
+
+        // GET: no link yet
+        let (status, json) = get_json_authed(Arc::clone(&state), &format!("/api/settings/auth/users/{}/telegram", uid), key).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(json.get("telegram_id").is_none(), "No link initially");
+
+        // PUT: link telegram
+        let (status, json) = put_json_authed(
+            Arc::clone(&state),
+            &format!("/api/settings/auth/users/{}/telegram", uid),
+            key,
+            serde_json::json!({ "telegram_id": 12345, "username": "alice_tg" }),
+        ).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["telegram_id"], 12345);
+        assert_eq!(json["username"], "alice_tg");
+
+        // GET: link exists
+        let (status, json) = get_json_authed(Arc::clone(&state), &format!("/api/settings/auth/users/{}/telegram", uid), key).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["telegram_id"], 12345);
+
+        // DELETE: unlink
+        let status = delete_authed(Arc::clone(&state), &format!("/api/settings/auth/users/{}/telegram", uid), key).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // GET: link gone
+        let (_, json) = get_json_authed(state, &format!("/api/settings/auth/users/{}/telegram", uid), key).await;
+        assert!(json.get("telegram_id").is_none());
+    }
+
+    #[tokio::test]
+    async fn telegram_link_nonexistent_user() {
+        let (_tmp, state) = test_app_state().await;
+        let (status, _) = put_json(
+            state,
+            "/api/settings/auth/users/nonexistent/telegram",
+            serde_json::json!({ "telegram_id": 999 }),
+        ).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn channels_settings_round_trip() {
+        let settings = ChannelsSettings {
+            telegram: TelegramChannelSettings {
+                enabled: true,
+                gap_minutes: Some(120),
+                stream_mode: Some("all_messages".into()),
+            },
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let parsed: ChannelsSettings = serde_json::from_str(&json).unwrap();
+        assert!(parsed.telegram.enabled);
+        assert_eq!(parsed.telegram.gap_minutes, Some(120));
+        assert_eq!(parsed.telegram.stream_mode.as_deref(), Some("all_messages"));
+    }
+
+    #[tokio::test]
+    async fn channels_settings_deserializes_with_defaults() {
+        let json = r#"{ "telegram": { "enabled": false } }"#;
+        let parsed: ChannelsSettings = serde_json::from_str(json).unwrap();
+        assert!(!parsed.telegram.enabled);
+        assert_eq!(parsed.telegram.gap_minutes, None);
+        assert_eq!(parsed.telegram.stream_mode, None);
     }
 }
