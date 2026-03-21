@@ -100,7 +100,7 @@ pub fn custom_tool_definitions() -> Vec<CustomToolDefinition> {
         // --- File tools ---
         CustomToolDefinition {
             name: "FileRead".into(),
-            description: "Read a file from the agent's filesystem sandbox. Path is relative to the home directory.".into(),
+            description: "Read a file from the agent's filesystem sandbox. Path must be relative to the home directory (e.g. \"notes.txt\", \"reports/weekly.md\"). No \"..\" traversal or absolute paths. The .starpod/ directory is internal and cannot be accessed — use MemorySearch/MemoryWrite for USER.md, MEMORY.md, and memory files instead.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -114,7 +114,7 @@ pub fn custom_tool_definitions() -> Vec<CustomToolDefinition> {
         },
         CustomToolDefinition {
             name: "FileWrite".into(),
-            description: "Write a file to the agent's filesystem sandbox. Path is relative to the home directory. Creates parent directories as needed.".into(),
+            description: "Write a file to the agent's filesystem sandbox. Path must be relative to the home directory (e.g. \"notes.txt\", \"reports/weekly.md\"). No \"..\" traversal or absolute paths. Creates parent directories as needed. The .starpod/ directory is internal and cannot be accessed — use MemoryWrite for USER.md, MEMORY.md, and memory files instead.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -439,14 +439,14 @@ fn validate_sandbox_path(relative: &str, home_dir: &Path) -> std::result::Result
     // Reject .. traversal
     for component in std::path::Path::new(relative).components() {
         if matches!(component, std::path::Component::ParentDir) {
-            return Err("Path traversal (..) is not allowed".into());
+            return Err("Path traversal (..) is not allowed. Paths must be relative to the home directory (e.g. \"notes.txt\"). To access USER.md or memory files, use MemorySearch/MemoryWrite tools instead.".into());
         }
     }
 
     // Reject paths starting with .starpod
     let normalized = relative.replace('\\', "/");
     if normalized == ".starpod" || normalized.starts_with(".starpod/") {
-        return Err("Cannot access .starpod/ directory — it contains internal state".into());
+        return Err("Cannot access .starpod/ directory — use MemorySearch/MemoryWrite tools for USER.md, MEMORY.md, and memory files.".into());
     }
 
     let resolved = home_dir.join(relative);
