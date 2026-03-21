@@ -303,7 +303,15 @@ impl BrowserSession {
         info!(port, binary = %binary.display(), "Spawning lightpanda");
 
         let child = Command::new(&binary)
-            .args(["serve", "--host", "127.0.0.1", "--port", &port.to_string()])
+            .args([
+                "serve",
+                "--host", "127.0.0.1",
+                "--port", &port.to_string(),
+                // Keep alive for up to 1 hour — the agent can take minutes
+                // between tool calls, and the default 10s timeout kills the
+                // session mid-conversation.
+                "--timeout", "3600",
+            ])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .kill_on_drop(true)

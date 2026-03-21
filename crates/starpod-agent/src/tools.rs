@@ -1712,11 +1712,19 @@ pub async fn handle_custom_tool(
                     is_error: false,
                     raw_content: None,
                 }),
-                Err(e) => Some(ToolResult {
-                    content: format!("Navigation failed: {e}"),
-                    is_error: true,
-                    raw_content: None,
-                }),
+                Err(e) => {
+                    let msg = e.to_string();
+                    // If the connection died (timeout, closed), drop the dead
+                    // session so the next BrowserOpen reconnects automatically.
+                    if msg.contains("closed") || msg.contains("Timeout") {
+                        *browser_guard = None;
+                    }
+                    Some(ToolResult {
+                        content: format!("Navigation failed: {msg}"),
+                        is_error: true,
+                        raw_content: None,
+                    })
+                }
             }
         }
 
