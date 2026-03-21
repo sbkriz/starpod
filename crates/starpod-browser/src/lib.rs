@@ -25,12 +25,8 @@
 //!
 //! # Requirements
 //!
-//! For auto-spawn mode, the `lightpanda` binary must be on `PATH`.
-//! Install it with:
-//!
-//! ```bash
-//! curl -fsSL https://pkg.lightpanda.io/install.sh | bash
-//! ```
+//! For auto-spawn mode, `lightpanda` is automatically downloaded and installed
+//! to `~/.local/bin/` if not already on `PATH`. No manual setup is needed.
 //!
 //! # Example
 //!
@@ -56,6 +52,7 @@
 //! # }
 //! ```
 
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -106,6 +103,10 @@ pub enum BrowserError {
     /// Timed out waiting for the browser process to accept CDP connections.
     #[error("timeout waiting for browser to start")]
     Timeout,
+
+    /// Auto-installation of Lightpanda failed.
+    #[error("failed to install lightpanda: {0}")]
+    InstallFailed(String),
 }
 
 /// Convenience alias for `Result<T, BrowserError>`.
@@ -155,18 +156,25 @@ impl BrowserSession {
     /// 3. Polls the port until CDP accepts connections (up to 10 seconds)
     /// 4. Connects via WebSocket and opens a blank page
     ///
+    /// If `lightpanda` is not found on `PATH`, it is automatically downloaded
+    /// from GitHub releases and installed to `~/.local/bin/`.
+    ///
     /// # Errors
     ///
-    /// - [`BrowserError::SpawnFailed`] if `lightpanda` is not on `PATH` or fails to start
+    /// - [`BrowserError::InstallFailed`] if auto-installation fails
+    /// - [`BrowserError::SpawnFailed`] if `lightpanda` fails to start after installation
     /// - [`BrowserError::Timeout`] if CDP doesn't become available within 10 seconds
     /// - [`BrowserError::ConnectionFailed`] if WebSocket handshake fails
     pub async fn launch() -> Result<Self> {
         let port = find_free_port().await?;
         let addr = format!("127.0.0.1:{port}");
 
-        info!(port, "Spawning lightpanda");
+        // Resolve the lightpanda binary, auto-installing if needed.
+        let binary = resolve_lightpanda_binary().await?;
 
-        let child = Command::new("lightpanda")
+        info!(port, binary = %binary.display(), "Spawning lightpanda");
+
+        let child = Command::new(&binary)
             .args(["serve", "--host", "127.0.0.1", "--port", &port.to_string()])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -412,6 +420,131 @@ impl Drop for BrowserSession {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-install
+// ---------------------------------------------------------------------------
+
+/// Resolve the `lightpanda` binary path.
+///
+/// 1. Check if `lightpanda` is on `PATH` (via `which`).
+/// 2. Check the default install location (`~/.local/bin/lightpanda`).
+/// 3. If not found, download from GitHub releases and install to `~/.local/bin/`.
+async fn resolve_lightpanda_binary() -> Result<PathBuf> {
+    // 1. Already on PATH?
+    if let Ok(path) = which_lightpanda().await {
+        debug!(path = %path.display(), "Found lightpanda on PATH");
+        return Ok(path);
+    }
+
+    // 2. Check default install location
+    let install_dir = default_install_dir()?;
+    let binary_path = install_dir.join("lightpanda");
+    if binary_path.is_file() {
+        debug!(path = %binary_path.display(), "Found lightpanda in ~/.local/bin");
+        return Ok(binary_path);
+    }
+
+    // 3. Auto-install
+    info!("lightpanda not found — downloading automatically");
+    install_lightpanda(&install_dir).await?;
+    Ok(binary_path)
+}
+
+/// Try to find `lightpanda` on PATH using `which`.
+async fn which_lightpanda() -> Result<PathBuf> {
+    let output = tokio::process::Command::new("which")
+        .arg("lightpanda")
+        .output()
+        .await
+        .map_err(|e| BrowserError::SpawnFailed(e.to_string()))?;
+
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return Ok(PathBuf::from(path));
+        }
+    }
+    Err(BrowserError::SpawnFailed("not on PATH".into()))
+}
+
+/// Returns `~/.local/bin`, creating it if it doesn't exist.
+fn default_install_dir() -> Result<PathBuf> {
+    let home = std::env::var("HOME")
+        .map_err(|_| BrowserError::InstallFailed("HOME not set".into()))?;
+    let dir = PathBuf::from(home).join(".local").join("bin");
+    Ok(dir)
+}
+
+/// Returns the platform-specific asset name for lightpanda GitHub releases.
+fn lightpanda_asset_name() -> Result<&'static str> {
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+
+    match (os, arch) {
+        ("macos", "aarch64") => Ok("lightpanda-aarch64-macos"),
+        ("macos", "x86_64") => Ok("lightpanda-x86_64-macos"),
+        ("linux", "aarch64") => Ok("lightpanda-aarch64-linux"),
+        ("linux", "x86_64") => Ok("lightpanda-x86_64-linux"),
+        _ => Err(BrowserError::InstallFailed(format!(
+            "unsupported platform: {os}/{arch}"
+        ))),
+    }
+}
+
+/// Download and install the lightpanda binary to `install_dir`.
+async fn install_lightpanda(install_dir: &std::path::Path) -> Result<()> {
+    let asset = lightpanda_asset_name()?;
+    let url = format!(
+        "https://github.com/lightpanda-io/browser/releases/download/nightly/{asset}"
+    );
+
+    info!(url = %url, "Downloading lightpanda");
+
+    // Download with curl (follows redirects, which GitHub requires)
+    let output = tokio::process::Command::new("curl")
+        .args(["-fsSL", "--output", "-", &url])
+        .output()
+        .await
+        .map_err(|e| BrowserError::InstallFailed(format!("curl failed: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BrowserError::InstallFailed(format!(
+            "download failed ({}): {stderr}",
+            output.status
+        )));
+    }
+
+    if output.stdout.is_empty() {
+        return Err(BrowserError::InstallFailed("downloaded file is empty".into()));
+    }
+
+    // Create install directory
+    tokio::fs::create_dir_all(install_dir)
+        .await
+        .map_err(|e| BrowserError::InstallFailed(format!("cannot create {}: {e}", install_dir.display())))?;
+
+    let binary_path = install_dir.join("lightpanda");
+
+    // Write binary
+    tokio::fs::write(&binary_path, &output.stdout)
+        .await
+        .map_err(|e| BrowserError::InstallFailed(format!("cannot write binary: {e}")))?;
+
+    // Make executable
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o755);
+        tokio::fs::set_permissions(&binary_path, perms)
+            .await
+            .map_err(|e| BrowserError::InstallFailed(format!("chmod failed: {e}")))?;
+    }
+
+    info!(path = %binary_path.display(), "lightpanda installed successfully");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -562,21 +695,29 @@ mod tests {
         assert_eq!(err.to_string(), "JS evaluation failed: syntax error");
     }
 
-    #[tokio::test]
-    async fn launch_fails_when_lightpanda_not_installed() {
-        // Set PATH to empty so lightpanda can't be found
-        let original_path = std::env::var("PATH").unwrap_or_default();
-        std::env::set_var("PATH", "");
-
-        let result = BrowserSession::launch().await;
-
-        std::env::set_var("PATH", &original_path);
-
-        assert!(result.is_err(), "should fail when lightpanda not on PATH");
-        let err = result.unwrap_err();
+    #[test]
+    fn lightpanda_asset_name_returns_valid_name() {
+        // Should succeed on any supported CI/dev platform
+        let name = lightpanda_asset_name().unwrap();
         assert!(
-            matches!(err, BrowserError::SpawnFailed(_)),
-            "expected SpawnFailed, got: {err}"
+            name.starts_with("lightpanda-"),
+            "asset name should start with 'lightpanda-', got: {name}"
+        );
+    }
+
+    #[test]
+    fn install_failed_error_display() {
+        let err = BrowserError::InstallFailed("no curl".into());
+        assert_eq!(err.to_string(), "failed to install lightpanda: no curl");
+    }
+
+    #[test]
+    fn default_install_dir_is_under_home() {
+        let dir = default_install_dir().unwrap();
+        assert!(
+            dir.ends_with(".local/bin"),
+            "install dir should end with .local/bin, got: {}",
+            dir.display()
         );
     }
 
