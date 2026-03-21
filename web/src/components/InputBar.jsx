@@ -18,6 +18,10 @@ function InputBar({ onSend, disabled }) {
   const fileInputRef = useRef(null)
   const dragCounterRef = useRef(0)
 
+  useEffect(() => {
+    if (!disabled && textareaRef.current) textareaRef.current.focus()
+  }, [disabled])
+
   function autoResize() {
     const el = textareaRef.current
     if (!el) return
@@ -188,6 +192,7 @@ function InputBar({ onSend, disabled }) {
             onInput={autoResize}
             onKeyDown={handleKeyDown}
             disabled={disabled}
+            autoFocus
             aria-label="Message"
           />
           <button
