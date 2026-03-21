@@ -235,7 +235,8 @@ fn generate_workspace_config() -> String {
 }
 
 /// Generate the `.env` content for the selected provider.
-pub fn generate_env_content(provider: &str, api_key: Option<&str>) -> String {
+#[cfg(test)]
+fn generate_env_content(provider: &str, api_key: Option<&str>) -> String {
     generate_env_content_full(provider, api_key, None)
 }
 
@@ -266,7 +267,8 @@ pub fn generate_env_content_full(
 }
 
 /// Generate the `.env.dev` content for the selected provider.
-pub fn generate_env_dev_content(provider: &str, api_key: Option<&str>) -> String {
+#[cfg(test)]
+fn generate_env_dev_content(provider: &str, api_key: Option<&str>) -> String {
     generate_env_dev_content_full(provider, api_key, None)
 }
 
