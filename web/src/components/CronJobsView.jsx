@@ -386,7 +386,7 @@ function JobRow({ job, isAdmin, onUpdate, onDelete }) {
         <div className="flex items-center gap-1 shrink-0">
           <button
             onClick={() => { setEditing(v => !v); setExpanded(true) }}
-            className="text-dim hover:text-accent transition-colors p-1"
+            className="text-dim hover:text-accent transition-colors p-1 cursor-pointer"
             title="Edit job"
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -396,7 +396,7 @@ function JobRow({ job, isAdmin, onUpdate, onDelete }) {
           <button
             onClick={handleDelete}
             disabled={deleting}
-            className="text-dim hover:text-err transition-colors p-1"
+            className="text-dim hover:text-err transition-colors p-1 cursor-pointer"
             title="Delete job"
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
