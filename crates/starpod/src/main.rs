@@ -1064,11 +1064,27 @@ async fn main() -> anyhow::Result<()> {
                     "✓".green().bold(),
                     agent_name.bright_white()
                 );
-                println!(
-                    "  {} Run {} to start.",
-                    "→".dimmed(),
-                    format!("starpod dev {}", agent_name).bright_white()
-                );
+
+                let start_now = dialoguer::Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                    .with_prompt("Start the agent now?")
+                    .default(true)
+                    .interact()
+                    .unwrap_or(false);
+
+                if start_now {
+                    println!();
+                    let exe = std::env::current_exe().unwrap_or_else(|_| "starpod".into());
+                    let mut cmd = std::process::Command::new(&exe);
+                    cmd.arg("dev").arg(&agent_name);
+                    let status = cmd.status()?;
+                    std::process::exit(status.code().unwrap_or(1));
+                } else {
+                    println!(
+                        "  {} Run {} to start.",
+                        "→".dimmed(),
+                        format!("starpod dev {}", agent_name).bright_white()
+                    );
+                }
             } else {
                 println!(
                     "  {} Run {} to create your first agent.",
