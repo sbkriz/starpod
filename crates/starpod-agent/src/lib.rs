@@ -948,11 +948,34 @@ impl StarpodAgent {
             extra_text.push_str(&dl_ctx);
         }
 
-        let prompt = if extra_text.is_empty() {
+        let mut prompt = if extra_text.is_empty() {
             message.text.clone()
         } else {
             format!("{}{}", message.text, extra_text)
         };
+
+        // Slash-command skill activation: /skill-name [args]
+        // When the message starts with /<name>, activate the skill inline so the
+        // LLM executes it immediately without an extra SkillActivate round-trip.
+        if let Some(skill_name) = message.text.strip_prefix('/') {
+            let skill_name = skill_name.split_whitespace().next().unwrap_or("");
+            if !skill_name.is_empty() {
+                if let Ok(Some(content)) = self.skills.activate_skill(skill_name) {
+                    let user_args = message.text[1 + skill_name.len()..].trim();
+                    prompt = if user_args.is_empty() {
+                        format!(
+                            "The user invoked the /{skill_name} skill. Execute the skill instructions below immediately.\n\n{content}"
+                        )
+                    } else {
+                        format!(
+                            "The user invoked the /{skill_name} skill with the following input: {user_args}\n\n\
+                             Execute the skill instructions below immediately, applying them to the user's input.\n\n{content}"
+                        )
+                    };
+                    debug!(skill = %skill_name, "Slash-command skill activated inline");
+                }
+            }
+        }
 
         let system_prompt = self.build_system_prompt(&session_id, &config, message.user_id.as_deref()).await?;
         let provider = self.build_provider(&config)?;
