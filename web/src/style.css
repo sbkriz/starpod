@@ -132,7 +132,33 @@ html, body {
 /* Hide header new-chat button when sidebar is open (unless transient/preview mode) */
 #sidebar.open:not(.transient) ~ #app #new-chat-header-btn { display: none; }
 
-/* Sidebar close button is now visible on all viewports (serves as sidebar toggle) */
+/* ── Header ── */
+#main-header {
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s ease;
+}
+
+/* Model pill */
+.model-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--color-primary);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+}
+
+.model-pill:hover {
+  background: var(--color-elevated);
+}
 
 /* ── Animations ── */
 @keyframes msg-in {
@@ -165,20 +191,54 @@ html, body {
 /* ── Badge pulse ── */
 .badge-running { animation: badge-pulse 1.2s ease-in-out infinite; }
 
-/* ── Input focus ── */
-#input-form {
-  transition: border-color 0.15s ease;
+/* ── Input form ── */
+.input-form-styled {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-main);
+  border-radius: 16px;
+  padding: 6px 6px 6px 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-form#input-form:focus-within {
+
+.input-form-styled:focus-within {
   border-color: var(--color-dim);
+  box-shadow: 0 0 0 1px rgba(59,130,246,0.08);
 }
 
 /* Kill focus ring on input-form internals — the form border handles it */
-#input-form textarea:focus,
-#input-form textarea:focus-visible,
-#input-form button:focus,
-#input-form button:focus-visible {
+.input-form-styled textarea:focus,
+.input-form-styled textarea:focus-visible,
+.input-form-styled button:focus,
+.input-form-styled button:focus-visible {
   outline: none;
+}
+
+/* Send button */
+.send-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-primary);
+  color: var(--color-bg);
+  cursor: pointer;
+  shrink: 0;
+  transition: background 0.15s ease, opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.send-btn:hover { opacity: 0.85; }
+.send-btn:disabled {
+  background: var(--color-elevated);
+  color: var(--color-dim);
+  cursor: default;
+  opacity: 0.5;
 }
 
 /* ── Tool icon variants ── */
@@ -393,21 +453,86 @@ button.copy-btn.copied { color: var(--color-ok); border-color: var(--color-ok); 
   margin: 0.5em 0;
 }
 
-/* ── Prompt chips ── */
-.prompt-chip {
+/* ── Sidebar search ── */
+.sidebar-search {
   display: flex;
   align-items: center;
-  font-family: var(--font-mono);
-  font-size: 0.8125rem;
-  color: var(--color-muted);
-  padding: 0.25rem 0;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  transition: border-color 0.15s ease;
+}
+
+.sidebar-search:focus-within {
+  border-color: var(--color-dim);
+}
+
+.sidebar-search-input {
+  flex: 1;
   background: none;
   border: none;
+  outline: none;
+  font-size: 0.8125rem;
+  color: var(--color-primary);
+  font-family: var(--font-sans);
+}
+
+.sidebar-search-input::placeholder {
+  color: var(--color-dim);
+}
+
+/* ── Sidebar footer ── */
+.sidebar-footer {
+  border-top: 1px solid var(--color-border-subtle);
+  padding: 8px 12px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-user-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+}
+
+.sidebar-user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--color-elevated);
+  border: 1px solid var(--color-border-main);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-secondary);
+  flex-shrink: 0;
+}
+
+/* ── Prompt chips ── */
+.prompt-chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  color: var(--color-secondary);
+  padding: 8px 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 .prompt-chip:hover {
   color: var(--color-primary);
+  border-color: var(--color-border-main);
+  background: var(--color-elevated);
 }
 
 /* ── Session items ── */
@@ -999,13 +1124,7 @@ button.copy-btn.copied { color: var(--color-ok); border-color: var(--color-ok); 
 
 .prompt-item button:hover { color: var(--color-err); }
 
-/* ── Sidebar settings footer ── */
-.sidebar-settings-footer {
-  border-top: 1px solid var(--color-border-subtle);
-  padding: 8px 12px;
-  flex-shrink: 0;
-}
-
+/* ── Sidebar settings button ── */
 .sidebar-settings-btn {
   display: flex;
   align-items: center;
@@ -1048,7 +1167,7 @@ button.copy-btn.copied { color: var(--color-ok); border-color: var(--color-ok); 
   }
 
   /* Touch targets: ensure minimum 44px hit area */
-  #input-form button,
+  .input-form-styled button,
   header button {
     min-width: 44px;
     min-height: 44px;
@@ -1058,7 +1177,7 @@ button.copy-btn.copied { color: var(--color-ok); border-color: var(--color-ok); 
   }
   .prompt-chip {
     min-height: 44px;
-    padding: 0.5rem 0;
+    padding: 8px 16px;
   }
   .s-save-btn {
     min-height: 44px;

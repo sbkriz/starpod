@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { PaperclipIcon, SendIcon } from './ui/Icons'
+import { PaperclipIcon } from './ui/Icons'
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
 
@@ -120,6 +120,10 @@ function InputBar({ onSend, disabled }) {
     }
   }, [addFiles])
 
+  const cfg = window.__STARPOD__ || {}
+  const agentName = cfg.agent_name || 'Starpod'
+  const hasContent = textareaRef.current?.value?.trim() || pendingAttachments.length > 0
+
   return (
     <div className="shrink-0 pt-2 pb-4 w-full input-bar-safe">
       <div className="max-w-[740px] mx-auto px-5">
@@ -161,7 +165,7 @@ function InputBar({ onSend, disabled }) {
         {/* Input form */}
         <form
           id="input-form"
-          className="flex gap-2 items-center bg-input-bg border border-border-subtle rounded-lg pl-3 pr-1.5 py-1.5"
+          className="input-form-styled"
           onSubmit={handleSubmit}
         >
           <input
@@ -176,19 +180,18 @@ function InputBar({ onSend, disabled }) {
           />
           <button
             type="button"
-            className="text-dim hover:text-secondary transition-colors shrink-0 cursor-pointer p-1"
+            className="text-dim hover:text-secondary transition-colors shrink-0 cursor-pointer p-1.5"
             onClick={() => fileInputRef.current && fileInputRef.current.click()}
             title="Attach file"
             aria-label="Attach file"
           >
             <PaperclipIcon />
           </button>
-          <span className="text-dim text-xs font-mono shrink-0 select-none">&gt;</span>
           <textarea
             ref={textareaRef}
-            className="flex-1 bg-transparent text-primary text-[13px] font-mono resize-none outline-none placeholder:text-dim leading-relaxed max-h-40"
+            className="flex-1 bg-transparent text-primary text-[13px] resize-none outline-none placeholder:text-dim leading-relaxed max-h-40"
             rows={1}
-            placeholder="..."
+            placeholder={`Message ${agentName}...`}
             onInput={autoResize}
             onKeyDown={handleKeyDown}
             disabled={disabled}
@@ -197,11 +200,13 @@ function InputBar({ onSend, disabled }) {
           />
           <button
             type="submit"
-            className="text-dim hover:text-secondary transition-colors shrink-0 cursor-pointer p-1.5 disabled:opacity-20 disabled:cursor-default"
+            className="send-btn"
             disabled={disabled}
             aria-label="Send message"
           >
-            <SendIcon />
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 19V5M5 12l7-7 7 7" />
+            </svg>
           </button>
         </form>
       </div>
