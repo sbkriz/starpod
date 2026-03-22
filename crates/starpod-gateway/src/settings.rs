@@ -80,6 +80,8 @@ struct GeneralSettings {
     #[serde(default)]
     followup_mode: FollowupMode,
     server_addr: String,
+    #[serde(default)]
+    self_improve: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -336,6 +338,7 @@ async fn get_general(
         compaction_provider: cfg.compaction_provider.clone(),
         followup_mode: cfg.followup_mode,
         server_addr: cfg.server_addr.clone(),
+        self_improve: cfg.self_improve,
     }))
 }
 
@@ -393,6 +396,8 @@ async fn put_general(
         FollowupMode::Queue => "queue",
     };
     table.insert("followup_mode".into(), toml::Value::String(fm.into()));
+
+    table.insert("self_improve".into(), toml::Value::Boolean(settings.self_improve));
 
     write_agent_toml(&state, &doc)?;
     Ok(ok_json())
@@ -2037,6 +2042,7 @@ mod tests {
             compaction_provider: None,
             followup_mode: FollowupMode::Inject,
             server_addr: "127.0.0.1:3000".into(),
+            self_improve: false,
         };
         let json = serde_json::to_string(&settings).unwrap();
         let back: GeneralSettings = serde_json::from_str(&json).unwrap();

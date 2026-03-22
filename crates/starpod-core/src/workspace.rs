@@ -535,6 +535,10 @@ pub struct AgentConfig {
     /// Internet access settings (web search & fetch).
     #[serde(default)]
     pub internet: InternetConfig,
+
+    /// Self-improve mode (beta).
+    #[serde(default)]
+    pub self_improve: bool,
 }
 
 fn default_agent_name() -> String {
@@ -581,6 +585,7 @@ impl Default for AgentConfig {
             attachments: AttachmentsConfig::default(),
             auth: AuthConfig::default(),
             internet: InternetConfig::default(),
+            self_improve: false,
         }
     }
 }
@@ -611,6 +616,7 @@ impl AgentConfig {
             attachments: self.attachments,
             auth: self.auth,
             internet: self.internet,
+            self_improve: self.self_improve,
             project_root: paths.project_root.clone(),
         }
     }

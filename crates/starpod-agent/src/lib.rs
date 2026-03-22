@@ -83,6 +83,7 @@ impl StarpodAgent {
             attachments: config.attachments.clone(),
             auth: config.auth.clone(),
             internet: config.internet.clone(),
+            self_improve: config.self_improve,
         };
 
         let starpod_dir = config.db_dir.parent().unwrap_or(&config.db_dir).to_path_buf();
@@ -353,6 +354,41 @@ impl StarpodAgent {
              Do not read, write, or execute anything outside this boundary.\n\
              IMPORTANT: Always create files and run commands within ~/, never in /tmp or other external directories.",
         );
+
+        // ── Memory nudging ────────────────────────────────────────────
+        prompt.push_str(
+            "\n\n--- MEMORY GUIDANCE ---\n\
+             Proactively persist knowledge — do not wait to be asked:\n\
+             • When the user corrects you or says \"remember this\" / \"don't do that again\" \
+             → save to USER.md via MemoryWrite so you never repeat the mistake.\n\
+             • When the user shares a preference, habit, name, or personal detail \
+             → update USER.md.\n\
+             • When you discover an environment fact, API quirk, or non-obvious workflow \
+             → append to MEMORY.md.\n\
+             • After every substantive conversation, append a brief summary to the daily log \
+             via MemoryAppendDaily — what was discussed, decisions made, and outcomes.\n\
+             Prioritize what reduces future user effort — the most valuable memory is one \
+             that prevents the user from having to correct or remind you again.\n\
+             Do NOT save: task progress, TODO lists, or information that only matters right now.",
+        );
+
+        // ── Self-improve guidance (skill auto-creation + improvement) ─
+        if config.self_improve {
+            prompt.push_str(
+                "\n\n--- SELF-IMPROVE MODE (beta) ---\n\
+                 You have self-improvement enabled. This means:\n\n\
+                 SKILL AUTO-CREATION:\n\
+                 After completing a complex task (roughly 5+ tool calls), fixing a tricky error, \
+                 or discovering a non-trivial workflow, save the approach as a skill with SkillCreate \
+                 so you can reuse it next time. Include clear steps, context on when to use it, \
+                 and any pitfalls you encountered. Do not create skills for trivial or one-off tasks.\n\n\
+                 SKILL SELF-IMPROVEMENT:\n\
+                 When using a skill and finding it outdated, incomplete, or wrong, update it \
+                 immediately with SkillUpdate — don't wait to be asked. Skills that aren't \
+                 maintained become liabilities. If a skill's instructions led you astray, \
+                 fix them so the next invocation succeeds.",
+            );
+        }
 
         // Inject skill catalog (progressive disclosure — names + descriptions only)
         if !skill_catalog.is_empty() {

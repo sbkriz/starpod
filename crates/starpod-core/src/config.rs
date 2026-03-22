@@ -537,6 +537,11 @@ pub struct StarpodConfig {
     #[serde(default)]
     pub internet: InternetConfig,
 
+    /// Self-improve mode (beta): when enabled, the agent proactively creates
+    /// skills from complex tasks and updates outdated skills during use.
+    #[serde(default)]
+    pub self_improve: bool,
+
     /// The project root directory (not serialized — set at load time).
     #[serde(skip)]
     pub project_root: PathBuf,
@@ -633,6 +638,7 @@ impl Default for StarpodConfig {
             attachments: AttachmentsConfig::default(),
             auth: AuthConfig::default(),
             internet: InternetConfig::default(),
+            self_improve: false,
             project_root: PathBuf::new(),
         }
     }
