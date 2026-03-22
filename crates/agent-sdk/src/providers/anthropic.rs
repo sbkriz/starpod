@@ -194,8 +194,8 @@ impl LlmProvider for AnthropicProvider {
         let cache = (Some(0.1), Some(1.25));
         match model {
             m if m.contains("opus") => CostRates {
-                input_per_million: 15.0,
-                output_per_million: 75.0,
+                input_per_million: 5.0,
+                output_per_million: 25.0,
                 cache_read_multiplier: cache.0,
                 cache_creation_multiplier: cache.1,
             },
@@ -206,8 +206,8 @@ impl LlmProvider for AnthropicProvider {
                 cache_creation_multiplier: cache.1,
             },
             m if m.contains("haiku") => CostRates {
-                input_per_million: 0.25,
-                output_per_million: 1.25,
+                input_per_million: 1.0,
+                output_per_million: 5.0,
                 cache_read_multiplier: cache.0,
                 cache_creation_multiplier: cache.1,
             },
@@ -509,9 +509,9 @@ mod tests {
     fn cost_rates_by_model() {
         let provider = AnthropicProvider::with_api_key("test-key");
         let opus = provider.cost_rates("claude-opus-4-6");
-        assert!(opus.input_per_million > 10.0);
+        assert!((opus.input_per_million - 5.0).abs() < 1e-9);
 
         let haiku = provider.cost_rates("claude-haiku-4-5");
-        assert!(haiku.input_per_million < 1.0);
+        assert!((haiku.input_per_million - 1.0).abs() < 1e-9);
     }
 }

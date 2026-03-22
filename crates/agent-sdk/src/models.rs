@@ -442,7 +442,7 @@ output = 99.0
     fn gemini_cache_rates() {
         let reg = ModelRegistry::with_defaults();
         let info = reg.get_fuzzy("gemini", "gemini-2-5-flash").unwrap();
-        assert!((info.pricing.cache_read_multiplier.unwrap() - 0.25).abs() < 1e-9);
+        assert!((info.pricing.cache_read_multiplier.unwrap() - 0.1).abs() < 1e-9);
     }
 
     #[test]

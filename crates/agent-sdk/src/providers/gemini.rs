@@ -405,11 +405,11 @@ impl LlmProvider for GeminiProvider {
             }
         }
         // Hardcoded fallback
-        let cache = (Some(0.25), Some(1.0));
+        let cache = (Some(0.1), Some(1.0));
         match model {
             m if m.contains("flash") => CostRates {
-                input_per_million: 0.15,
-                output_per_million: 0.6,
+                input_per_million: 0.30,
+                output_per_million: 2.50,
                 cache_read_multiplier: cache.0,
                 cache_creation_multiplier: cache.1,
             },

@@ -4,6 +4,8 @@
 # and provider metadata. Override at runtime with a models.toml in your config
 # directory (e.g. .starpod/config/models.toml).
 #
+# Prices verified from official docs on 2026-03-22.
+#
 # Schema:
 #   [<provider>]
 #   default_model = "<model-id>"          # default for this provider
@@ -22,6 +24,8 @@
 #   # cache_creation_multiplier = <float>
 
 # ── Anthropic ──────────────────────────────────────────────────────────
+# Source: https://platform.claude.com/docs/en/about-claude/pricing
+# Cache: 5-min write = 1.25x, read/hit = 0.1x
 
 [anthropic]
 default_model = "claude-haiku-4-5"
@@ -30,15 +34,15 @@ cache_read_multiplier = 0.1
 cache_creation_multiplier = 1.25
 
 [anthropic.models.claude-opus-4-6]
-input = 15.0
-output = 75.0
-context_window = 200000
+input = 5.0
+output = 25.0
+context_window = 1000000
 supports_vision = true
 
 [anthropic.models.claude-sonnet-4-6]
 input = 3.0
 output = 15.0
-context_window = 200000
+context_window = 1000000
 supports_vision = true
 
 [anthropic.models.claude-sonnet-4-5]
@@ -48,12 +52,14 @@ context_window = 200000
 supports_vision = true
 
 [anthropic.models.claude-haiku-4-5]
-input = 0.25
-output = 1.25
+input = 1.0
+output = 5.0
 context_window = 200000
 supports_vision = true
 
 # ── OpenAI ─────────────────────────────────────────────────────────────
+# Source: https://openai.com/api/pricing
+# Cache: automatic, read = 0.5x, write = 1.0x (no surcharge)
 
 [openai]
 default_model = "gpt-4o"
@@ -100,11 +106,13 @@ context_window = 200000
 supports_vision = true
 
 # ── Gemini ─────────────────────────────────────────────────────────────
+# Source: https://ai.google.dev/gemini-api/docs/pricing
+# Cache: read = 0.1x (approx), write = 1.0x + per-hour storage fee
 
 [gemini]
 default_model = "gemini-2.5-pro"
 api_key_env = "GEMINI_API_KEY"
-cache_read_multiplier = 0.25
+cache_read_multiplier = 0.1
 cache_creation_multiplier = 1.0
 
 [gemini.models.gemini-2-5-pro]
@@ -114,8 +122,14 @@ context_window = 1048576
 supports_vision = true
 
 [gemini.models.gemini-2-5-flash]
-input = 0.15
-output = 0.60
+input = 0.30
+output = 2.50
+context_window = 1048576
+supports_vision = true
+
+[gemini.models.gemini-2-5-flash-lite]
+input = 0.10
+output = 0.40
 context_window = 1048576
 supports_vision = true
 
@@ -126,6 +140,7 @@ context_window = 1048576
 supports_vision = true
 
 # ── Groq ───────────────────────────────────────────────────────────────
+# Source: https://console.groq.com/docs/models
 
 [groq]
 default_model = "llama-3.3-70b-versatile"
@@ -134,19 +149,26 @@ api_key_env = "GROQ_API_KEY"
 [groq.models.llama-3-3-70b-versatile]
 input = 0.59
 output = 0.79
-context_window = 128000
+context_window = 131072
 
 [groq.models.llama-3-1-8b-instant]
 input = 0.05
 output = 0.08
-context_window = 128000
+context_window = 131072
 
-[groq.models.gemma2-9b-it]
-input = 0.20
-output = 0.20
-context_window = 8192
+[groq.models."openai/gpt-oss-120b"]
+input = 0.15
+output = 0.60
+context_window = 131072
+
+[groq.models."openai/gpt-oss-20b"]
+input = 0.075
+output = 0.30
+context_window = 131072
 
 # ── DeepSeek ───────────────────────────────────────────────────────────
+# Source: https://api-docs.deepseek.com/quick_start/pricing
+# Both models are DeepSeek-V3.2; cache read = 0.1x
 
 [deepseek]
 default_model = "deepseek-chat"
@@ -155,13 +177,13 @@ cache_read_multiplier = 0.1
 cache_creation_multiplier = 1.0
 
 [deepseek.models.deepseek-chat]
-input = 0.27
-output = 1.10
+input = 0.28
+output = 0.42
 context_window = 65536
 
 [deepseek.models.deepseek-reasoner]
-input = 0.55
-output = 2.19
+input = 0.28
+output = 0.42
 context_window = 65536
 
 # ── OpenRouter ─────────────────────────────────────────────────────────
@@ -172,14 +194,14 @@ default_model = "anthropic/claude-haiku-4-5"
 api_key_env = "OPENROUTER_API_KEY"
 
 [openrouter.models."anthropic/claude-haiku-4-5"]
-input = 0.25
-output = 1.25
+input = 1.0
+output = 5.0
 context_window = 200000
 
 [openrouter.models."anthropic/claude-sonnet-4-6"]
 input = 3.0
 output = 15.0
-context_window = 200000
+context_window = 1000000
 
 [openrouter.models."openai/gpt-4o"]
 input = 2.5
