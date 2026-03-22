@@ -137,4 +137,90 @@ mod tests {
         let expected = (1000.0 * 3.0 + 10_000.0 * 0.3 + 2000.0 * 3.75 + 500.0 * 15.0) / 1_000_000.0;
         assert!((cost - expected).abs() < 1e-12, "expected {}, got {}", expected, cost);
     }
+
+    #[test]
+    fn cost_rates_cache_read_only() {
+        // All input from cache (common on subsequent turns)
+        let rates = CostRates {
+            input_per_million: 3.0,
+            output_per_million: 15.0,
+            cache_read_multiplier: Some(0.1),
+            cache_creation_multiplier: Some(1.25),
+        };
+        let cost = rates.compute_with_cache(0, 200, 13_000, 0);
+        let expected = (13_000.0 * 0.3 + 200.0 * 15.0) / 1_000_000.0;
+        assert!((cost - expected).abs() < 1e-12, "expected {}, got {}", expected, cost);
+    }
+
+    #[test]
+    fn cost_rates_cache_creation_only() {
+        // First turn: system prompt written to cache, no reads yet
+        let rates = CostRates {
+            input_per_million: 3.0,
+            output_per_million: 15.0,
+            cache_read_multiplier: Some(0.1),
+            cache_creation_multiplier: Some(1.25),
+        };
+        let cost = rates.compute_with_cache(500, 452, 0, 13_000);
+        let expected = (500.0 * 3.0 + 13_000.0 * 3.75 + 452.0 * 15.0) / 1_000_000.0;
+        assert!((cost - expected).abs() < 1e-12, "expected {}, got {}", expected, cost);
+    }
+
+    #[test]
+    fn cost_rates_no_cache_multipliers_bills_at_standard_rate() {
+        // Providers without caching (OpenAI, Gemini) — cache tokens billed at input rate
+        let rates = CostRates {
+            input_per_million: 2.0,
+            output_per_million: 8.0,
+            cache_read_multiplier: None,
+            cache_creation_multiplier: None,
+        };
+        let cost = rates.compute_with_cache(1000, 500, 5000, 3000);
+        // All input tokens (1000 + 5000 + 3000) at $2/M + 500 output at $8/M
+        let expected = (9000.0 * 2.0 + 500.0 * 8.0) / 1_000_000.0;
+        assert!((cost - expected).abs() < 1e-12, "expected {}, got {}", expected, cost);
+    }
+
+    #[test]
+    fn multi_turn_cost_accumulation_with_cache() {
+        // Simulates the accumulation pattern from run_agent_loop in query.rs:
+        // total_cost += rates.compute_with_cache(...) per turn.
+        let rates = CostRates {
+            input_per_million: 3.0,  // Sonnet
+            output_per_million: 15.0,
+            cache_read_multiplier: Some(0.1),
+            cache_creation_multiplier: Some(1.25),
+        };
+
+        let mut total_cost: f64 = 0.0;
+
+        // Turn 1: first request, system prompt written to cache
+        // API returns: input_tokens=500 (uncached), cache_creation=12000, cache_read=0
+        total_cost += rates.compute_with_cache(500, 800, 0, 12_000);
+
+        // Turn 2: tool use follow-up, system prompt now served from cache
+        // API returns: input_tokens=200 (new user msg), cache_creation=0, cache_read=12000
+        total_cost += rates.compute_with_cache(200, 400, 12_000, 0);
+
+        // Turn 3: another follow-up, still reading from cache
+        // API returns: input_tokens=300, cache_creation=0, cache_read=12000
+        total_cost += rates.compute_with_cache(300, 600, 12_000, 0);
+
+        // Verify total
+        let turn1 = (500.0 * 3.0 + 12_000.0 * 3.75 + 800.0 * 15.0) / 1_000_000.0;
+        let turn2 = (200.0 * 3.0 + 12_000.0 * 0.3 + 400.0 * 15.0) / 1_000_000.0;
+        let turn3 = (300.0 * 3.0 + 12_000.0 * 0.3 + 600.0 * 15.0) / 1_000_000.0;
+        let expected = turn1 + turn2 + turn3;
+
+        assert!(
+            (total_cost - expected).abs() < 1e-12,
+            "multi-turn total: expected {}, got {}",
+            expected,
+            total_cost
+        );
+
+        // Sanity: cache reads should make turns 2-3 much cheaper than turn 1
+        assert!(turn2 < turn1, "turn 2 should be cheaper than turn 1 (cache reads vs creation)");
+        assert!(turn3 < turn1, "turn 3 should be cheaper than turn 1 (cache reads vs creation)");
+    }
 }
