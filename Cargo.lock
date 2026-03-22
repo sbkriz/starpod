@@ -32,6 +32,7 @@ dependencies = [
  "tokio-stream",
  "tokio-test",
  "tokio-util",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "uuid",

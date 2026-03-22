@@ -1,6 +1,7 @@
 //! Google Gemini provider.
 
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -17,6 +18,7 @@ use crate::client::{
     MessageResponse, RetryConfig, StreamEvent,
 };
 use crate::error::{AgentError, Result};
+use crate::pricing::PricingRegistry;
 use crate::provider::{CostRates, LlmProvider, ProviderCapabilities};
 
 const DEFAULT_GEMINI_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -27,6 +29,7 @@ pub struct GeminiProvider {
     api_key: String,
     base_url: String,
     retry_config: RetryConfig,
+    pricing: Option<Arc<PricingRegistry>>,
 }
 
 impl GeminiProvider {
@@ -42,12 +45,19 @@ impl GeminiProvider {
             api_key: api_key.into(),
             base_url: base_url.into(),
             retry_config: RetryConfig::default(),
+            pricing: None,
         }
     }
 
     /// Override the default retry configuration.
     pub fn with_retry_config(mut self, config: RetryConfig) -> Self {
         self.retry_config = config;
+        self
+    }
+
+    /// Attach a pricing registry for cost lookups.
+    pub fn with_pricing(mut self, registry: Arc<PricingRegistry>) -> Self {
+        self.pricing = Some(registry);
         self
     }
 
@@ -389,24 +399,33 @@ impl LlmProvider for GeminiProvider {
     }
 
     fn cost_rates(&self, model: &str) -> CostRates {
+        if let Some(ref registry) = self.pricing {
+            if let Some(rates) = registry.get_fuzzy("gemini", model) {
+                if rates.input_per_million > 0.0 {
+                    return rates.clone();
+                }
+            }
+        }
+        // Hardcoded fallback
+        let cache = (Some(0.25), Some(1.0));
         match model {
             m if m.contains("flash") => CostRates {
                 input_per_million: 0.15,
                 output_per_million: 0.6,
-                cache_read_multiplier: None,
-                cache_creation_multiplier: None,
+                cache_read_multiplier: cache.0,
+                cache_creation_multiplier: cache.1,
             },
             m if m.contains("pro") => CostRates {
                 input_per_million: 1.25,
                 output_per_million: 10.0,
-                cache_read_multiplier: None,
-                cache_creation_multiplier: None,
+                cache_read_multiplier: cache.0,
+                cache_creation_multiplier: cache.1,
             },
             _ => CostRates {
                 input_per_million: 0.15,
                 output_per_million: 0.6,
-                cache_read_multiplier: None,
-                cache_creation_multiplier: None,
+                cache_read_multiplier: cache.0,
+                cache_creation_multiplier: cache.1,
             },
         }
     }

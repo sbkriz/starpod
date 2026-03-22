@@ -2,6 +2,7 @@
 
 use std::env;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -18,6 +19,7 @@ use crate::client::{
     MessageDelta, MessageResponse, RetryConfig, StreamEvent,
 };
 use crate::error::{AgentError, Result};
+use crate::pricing::PricingRegistry;
 use crate::provider::{CostRates, LlmProvider, ProviderCapabilities};
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -29,6 +31,7 @@ pub struct AnthropicProvider {
     api_key: String,
     api_url: String,
     retry_config: RetryConfig,
+    pricing: Option<Arc<PricingRegistry>>,
 }
 
 impl AnthropicProvider {
@@ -63,12 +66,19 @@ impl AnthropicProvider {
             api_key,
             api_url,
             retry_config: RetryConfig::default(),
+            pricing: None,
         }
     }
 
     /// Override the default retry configuration.
     pub fn with_retry_config(mut self, config: RetryConfig) -> Self {
         self.retry_config = config;
+        self
+    }
+
+    /// Attach a pricing registry for cost lookups.
+    pub fn with_pricing(mut self, registry: Arc<PricingRegistry>) -> Self {
+        self.pricing = Some(registry);
         self
     }
 
@@ -175,7 +185,14 @@ impl LlmProvider for AnthropicProvider {
     }
 
     fn cost_rates(&self, model: &str) -> CostRates {
-        // Anthropic cache pricing: reads at 10% of input rate, writes at 125%.
+        if let Some(ref registry) = self.pricing {
+            if let Some(rates) = registry.get_fuzzy("anthropic", model) {
+                if rates.input_per_million > 0.0 {
+                    return rates.clone();
+                }
+            }
+        }
+        // Hardcoded fallback
         let cache = (Some(0.1), Some(1.25));
         match model {
             m if m.contains("opus") => CostRates {

@@ -8,7 +8,7 @@ use chrono::Local;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn};
 
-use agent_sdk::{ExternalToolHandlerFn, LlmProvider, Message, Options, PermissionMode, Query, QueryAttachment};
+use agent_sdk::{ExternalToolHandlerFn, LlmProvider, Message, Options, PermissionMode, PricingRegistry, Query, QueryAttachment};
 use agent_sdk::{AnthropicProvider, GeminiProvider, OpenAiProvider};
 use agent_sdk::options::{SystemPrompt, ThinkingConfig};
 use starpod_core::{FollowupMode, ReasoningEffort};
@@ -414,12 +414,12 @@ impl StarpodAgent {
     }
 
     /// Build the LLM provider based on `config.provider`.
-    fn build_provider(config: &StarpodConfig) -> Result<Box<dyn LlmProvider>> {
-        Self::build_provider_for(&config.provider, config)
+    fn build_provider(&self, config: &StarpodConfig) -> Result<Box<dyn LlmProvider>> {
+        self.build_provider_for(&config.provider, config)
     }
 
     /// Build an LLM provider for the given provider name using config for API key / base URL.
-    fn build_provider_for(provider_name: &str, config: &StarpodConfig) -> Result<Box<dyn LlmProvider>> {
+    fn build_provider_for(&self, provider_name: &str, config: &StarpodConfig) -> Result<Box<dyn LlmProvider>> {
         let api_key = config.resolved_provider_api_key(provider_name)
             .ok_or_else(|| StarpodError::Config(format!(
                 "No API key found for provider '{}'. Set it in config.toml or via environment variable.",
@@ -431,12 +431,20 @@ impl StarpodAgent {
                 provider_name
             )))?;
 
+        let pricing = self.load_pricing_registry();
+
         let provider: Box<dyn LlmProvider> = match provider_name {
-            "anthropic" => Box::new(AnthropicProvider::new(api_key, base_url)),
-            "gemini" => Box::new(GeminiProvider::with_base_url(api_key, base_url)),
+            "anthropic" => Box::new(
+                AnthropicProvider::new(api_key, base_url).with_pricing(pricing)
+            ),
+            "gemini" => Box::new(
+                GeminiProvider::with_base_url(api_key, base_url).with_pricing(pricing)
+            ),
             // OpenAI-compatible providers
             "openai" | "groq" | "deepseek" | "openrouter" | "ollama" => {
-                Box::new(OpenAiProvider::with_base_url(api_key, base_url, provider_name))
+                Box::new(
+                    OpenAiProvider::with_base_url(api_key, base_url, provider_name).with_pricing(pricing)
+                )
             }
             other => {
                 return Err(StarpodError::Config(format!(
@@ -447,6 +455,31 @@ impl StarpodAgent {
         };
 
         Ok(provider)
+    }
+
+    /// Load the pricing registry: embedded defaults + optional config override.
+    fn load_pricing_registry(&self) -> Arc<PricingRegistry> {
+        let mut registry = PricingRegistry::with_defaults();
+
+        let pricing_path = self.paths.config_dir.join("pricing.toml");
+        if pricing_path.exists() {
+            match std::fs::read_to_string(&pricing_path) {
+                Ok(contents) => match PricingRegistry::from_toml(&contents) {
+                    Ok(overrides) => {
+                        debug!(path = %pricing_path.display(), "loaded pricing overrides");
+                        registry.merge(overrides);
+                    }
+                    Err(e) => {
+                        warn!(path = %pricing_path.display(), error = %e, "failed to parse pricing.toml, using defaults");
+                    }
+                },
+                Err(e) => {
+                    warn!(path = %pricing_path.display(), error = %e, "failed to read pricing.toml, using defaults");
+                }
+            }
+        }
+
+        Arc::new(registry)
     }
 
     /// Build the pre-compaction handler that saves key facts before context is discarded.
@@ -521,7 +554,7 @@ impl StarpodAgent {
             .or_else(|| config.compaction_model.clone())
             .unwrap_or_else(|| config.model.clone());
 
-        let provider: Arc<dyn LlmProvider> = match Self::build_provider(config) {
+        let provider: Arc<dyn LlmProvider> = match self.build_provider(config) {
             Ok(p) => Arc::from(p),
             Err(e) => {
                 warn!(error = %e, "Failed to build provider for memory flush, falling back to dumb dump");
@@ -688,7 +721,7 @@ impl StarpodAgent {
         append_execution_context(&mut system_prompt, message.channel_id.as_deref(), message.user_id.as_deref());
 
         // Step 4: Build provider and options, then run query
-        let provider = Self::build_provider(&config)?;
+        let provider = self.build_provider(&config)?;
 
         let mut builder = Options::builder()
             .allowed_tools(Self::allowed_tools())
@@ -721,7 +754,7 @@ impl StarpodAgent {
         }
         if let Some(ref cp) = config.compaction_provider {
             if cp != &config.provider {
-                match Self::build_provider_for(cp, &config) {
+                match self.build_provider_for(cp, &config) {
                     Ok(p) => { builder = builder.compaction_provider(p); }
                     Err(e) => {
                         tracing::warn!(provider = cp, error = %e, "Failed to build compaction provider, falling back to primary");
@@ -886,7 +919,7 @@ impl StarpodAgent {
         };
 
         let system_prompt = self.build_system_prompt(&session_id, &config, message.user_id.as_deref()).await?;
-        let provider = Self::build_provider(&config)?;
+        let provider = self.build_provider(&config)?;
 
         // Create the followup channel — sender goes to caller, receiver to the agent loop
         let (followup_tx, followup_rx) = mpsc::unbounded_channel::<String>();
@@ -924,7 +957,7 @@ impl StarpodAgent {
         }
         if let Some(ref cp) = config.compaction_provider {
             if cp != &config.provider {
-                match Self::build_provider_for(cp, &config) {
+                match self.build_provider_for(cp, &config) {
                     Ok(p) => { builder = builder.compaction_provider(p); }
                     Err(e) => {
                         tracing::warn!(provider = cp, error = %e, "Failed to build compaction provider, falling back to primary");
