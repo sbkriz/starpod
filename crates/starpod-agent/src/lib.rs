@@ -312,7 +312,7 @@ impl StarpodAgent {
     }
 
     /// Build the system prompt from bootstrap context + skill catalog.
-    async fn build_system_prompt(&self, session_id: &str, config: &StarpodConfig, user_id: Option<&str>) -> Result<String> {
+    async fn build_system_prompt(&self, session_id: &str, config: &StarpodConfig, user_id: Option<&str>, activated_skill: Option<&str>) -> Result<String> {
         let agent_name = &config.agent_name;
         let bootstrap = if let Some(uid) = user_id {
             let user_dir = self.paths.users_dir.join(uid);
@@ -321,7 +321,7 @@ impl StarpodAgent {
         } else {
             self.memory.bootstrap_context()?
         };
-        let skill_catalog = self.skills.skill_catalog()?;
+        let skill_catalog = self.skills.skill_catalog_excluding(activated_skill)?;
         let date_str = Local::now().format("%A, %B %d, %Y at %H:%M").to_string();
         let tz_str = config.resolved_timezone().unwrap_or_else(|| "UTC".to_string());
 
@@ -390,7 +390,8 @@ impl StarpodAgent {
             );
         }
 
-        // Inject skill catalog (progressive disclosure — names + descriptions only)
+        // Inject skill catalog (progressive disclosure — names + descriptions only).
+        // The activated skill (if any) is already excluded by skill_catalog_excluding().
         if !skill_catalog.is_empty() {
             prompt.push_str("\n\nThe following skills provide specialized instructions for specific tasks.\n\
                              When a task matches a skill's description, call the SkillActivate tool \
@@ -752,7 +753,7 @@ impl StarpodAgent {
         };
 
         // Step 3: Build system prompt
-        let mut system_prompt = self.build_system_prompt(&session_id, &config, message.user_id.as_deref()).await?;
+        let mut system_prompt = self.build_system_prompt(&session_id, &config, message.user_id.as_deref(), None).await?;
 
         append_execution_context(&mut system_prompt, message.channel_id.as_deref(), message.user_id.as_deref());
 
@@ -957,27 +958,32 @@ impl StarpodAgent {
         // Slash-command skill activation: /skill-name [args]
         // When the message starts with /<name>, activate the skill inline so the
         // LLM executes it immediately without an extra SkillActivate round-trip.
+        let mut activated_skill: Option<String> = None;
         if let Some(skill_name) = message.text.strip_prefix('/') {
             let skill_name = skill_name.split_whitespace().next().unwrap_or("");
             if !skill_name.is_empty() {
                 if let Ok(Some(content)) = self.skills.activate_skill(skill_name) {
                     let user_args = message.text[1 + skill_name.len()..].trim();
-                    prompt = if user_args.is_empty() {
-                        format!(
-                            "The user invoked the /{skill_name} skill. Execute the skill instructions below immediately.\n\n{content}"
-                        )
-                    } else {
-                        format!(
-                            "The user invoked the /{skill_name} skill with the following input: {user_args}\n\n\
-                             Execute the skill instructions below immediately, applying them to the user's input.\n\n{content}"
-                        )
-                    };
+                    let execute_preamble = format!(
+                        "The user invoked the /{skill_name} skill{}. \
+                         IMPORTANT: Execute the skill instructions below immediately — do NOT ask \
+                         clarifying questions, do NOT summarize the skill, do NOT ask for confirmation. \
+                         Start executing the first step right now. Use any defaults specified in the \
+                         skill when the user has not provided explicit overrides.",
+                        if user_args.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" with the following input: {user_args}")
+                        }
+                    );
+                    prompt = format!("{execute_preamble}\n\n{content}");
+                    activated_skill = Some(skill_name.to_string());
                     debug!(skill = %skill_name, "Slash-command skill activated inline");
                 }
             }
         }
 
-        let system_prompt = self.build_system_prompt(&session_id, &config, message.user_id.as_deref()).await?;
+        let system_prompt = self.build_system_prompt(&session_id, &config, message.user_id.as_deref(), activated_skill.as_deref()).await?;
         let provider = self.build_provider(&config)?;
 
         // Create the followup channel — sender goes to caller, receiver to the agent loop
