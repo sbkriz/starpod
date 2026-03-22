@@ -434,7 +434,7 @@ output = 99.0
     fn openai_cache_rates() {
         let reg = ModelRegistry::with_defaults();
         let info = reg.get("openai", "gpt-4o").unwrap();
-        assert!((info.pricing.cache_read_multiplier.unwrap() - 0.5).abs() < 1e-9);
+        assert!((info.pricing.cache_read_multiplier.unwrap() - 0.1).abs() < 1e-9);
         assert!((info.pricing.cache_creation_multiplier.unwrap() - 1.0).abs() < 1e-9);
     }
 

@@ -429,12 +429,12 @@ impl LlmProvider for OpenAiProvider {
             }
         }
         // Hardcoded fallback
-        let cache = (Some(0.5), Some(1.0));
+        let cache = (Some(0.1), Some(1.0));
         match model {
             "gpt-4.1" => CostRates { input_per_million: 2.0, output_per_million: 8.0, cache_read_multiplier: cache.0, cache_creation_multiplier: cache.1 },
             "gpt-4o" => CostRates { input_per_million: 2.5, output_per_million: 10.0, cache_read_multiplier: cache.0, cache_creation_multiplier: cache.1 },
             "gpt-4o-mini" => CostRates { input_per_million: 0.15, output_per_million: 0.6, cache_read_multiplier: cache.0, cache_creation_multiplier: cache.1 },
-            "o3" => CostRates { input_per_million: 10.0, output_per_million: 40.0, cache_read_multiplier: cache.0, cache_creation_multiplier: cache.1 },
+            "o3" => CostRates { input_per_million: 2.0, output_per_million: 8.0, cache_read_multiplier: cache.0, cache_creation_multiplier: cache.1 },
             "o4-mini" => CostRates { input_per_million: 1.1, output_per_million: 4.4, cache_read_multiplier: cache.0, cache_creation_multiplier: cache.1 },
             _ => CostRates { input_per_million: 2.0, output_per_million: 8.0, cache_read_multiplier: cache.0, cache_creation_multiplier: cache.1 },
         }
