@@ -120,7 +120,7 @@ const Chat = forwardRef(function Chat({ wsRef, onSendPrompt }, ref) {
           // Move to finalized messages
           const finalized = {
             role: 'assistant_stream',
-            bubbles: bubbles.filter(b => b.text.trim()),
+            bubbles,
             tools,
             stats,
             errors,
