@@ -8,7 +8,7 @@ use chrono::Local;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, warn};
 
-use agent_sdk::{ExternalToolHandlerFn, LlmProvider, Message, Options, PermissionMode, PricingRegistry, Query, QueryAttachment};
+use agent_sdk::{ExternalToolHandlerFn, LlmProvider, Message, ModelRegistry, Options, PermissionMode, Query, QueryAttachment};
 use agent_sdk::{AnthropicProvider, GeminiProvider, OpenAiProvider};
 use agent_sdk::options::{SystemPrompt, ThinkingConfig};
 use starpod_core::{FollowupMode, ReasoningEffort};
@@ -431,7 +431,7 @@ impl StarpodAgent {
                 provider_name
             )))?;
 
-        let pricing = self.load_pricing_registry();
+        let pricing = self.load_model_registry();
 
         let provider: Box<dyn LlmProvider> = match provider_name {
             "anthropic" => Box::new(
@@ -458,13 +458,13 @@ impl StarpodAgent {
     }
 
     /// Load the pricing registry: embedded defaults + optional config override.
-    fn load_pricing_registry(&self) -> Arc<PricingRegistry> {
-        let mut registry = PricingRegistry::with_defaults();
+    fn load_model_registry(&self) -> Arc<ModelRegistry> {
+        let mut registry = ModelRegistry::with_defaults();
 
-        let pricing_path = self.paths.config_dir.join("pricing.toml");
+        let pricing_path = self.paths.config_dir.join("models.toml");
         if pricing_path.exists() {
             match std::fs::read_to_string(&pricing_path) {
-                Ok(contents) => match PricingRegistry::from_toml(&contents) {
+                Ok(contents) => match ModelRegistry::from_toml(&contents) {
                     Ok(overrides) => {
                         debug!(path = %pricing_path.display(), "loaded pricing overrides");
                         registry.merge(overrides);

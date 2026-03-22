@@ -19,7 +19,7 @@ use crate::client::{
     MessageDelta, MessageResponse, RetryConfig, StreamEvent,
 };
 use crate::error::{AgentError, Result};
-use crate::pricing::PricingRegistry;
+use crate::models::ModelRegistry;
 use crate::provider::{CostRates, LlmProvider, ProviderCapabilities};
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -31,7 +31,7 @@ pub struct AnthropicProvider {
     api_key: String,
     api_url: String,
     retry_config: RetryConfig,
-    pricing: Option<Arc<PricingRegistry>>,
+    pricing: Option<Arc<ModelRegistry>>,
 }
 
 impl AnthropicProvider {
@@ -77,7 +77,7 @@ impl AnthropicProvider {
     }
 
     /// Attach a pricing registry for cost lookups.
-    pub fn with_pricing(mut self, registry: Arc<PricingRegistry>) -> Self {
+    pub fn with_pricing(mut self, registry: Arc<ModelRegistry>) -> Self {
         self.pricing = Some(registry);
         self
     }
@@ -186,13 +186,11 @@ impl LlmProvider for AnthropicProvider {
 
     fn cost_rates(&self, model: &str) -> CostRates {
         if let Some(ref registry) = self.pricing {
-            if let Some(rates) = registry.get_fuzzy("anthropic", model) {
-                if rates.input_per_million > 0.0 {
-                    return rates.clone();
-                }
+            if let Some(rates) = registry.get_pricing("anthropic", model) {
+                return rates;
             }
         }
-        // Hardcoded fallback
+        // Hardcoded fallback (used only when no registry is attached)
         let cache = (Some(0.1), Some(1.25));
         match model {
             m if m.contains("opus") => CostRates {

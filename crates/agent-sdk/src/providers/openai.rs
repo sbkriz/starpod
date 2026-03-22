@@ -21,7 +21,7 @@ use crate::client::{
     MessageDelta, MessageResponse, RetryConfig, StreamEvent,
 };
 use crate::error::{AgentError, Result};
-use crate::pricing::PricingRegistry;
+use crate::models::ModelRegistry;
 use crate::provider::{CostRates, LlmProvider, ProviderCapabilities};
 
 const DEFAULT_OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
@@ -36,7 +36,7 @@ pub struct OpenAiProvider {
     base_url: String,
     provider_name: String,
     retry_config: RetryConfig,
-    pricing: Option<Arc<PricingRegistry>>,
+    pricing: Option<Arc<ModelRegistry>>,
 }
 
 impl OpenAiProvider {
@@ -68,7 +68,7 @@ impl OpenAiProvider {
     }
 
     /// Attach a pricing registry for cost lookups.
-    pub fn with_pricing(mut self, registry: Arc<PricingRegistry>) -> Self {
+    pub fn with_pricing(mut self, registry: Arc<ModelRegistry>) -> Self {
         self.pricing = Some(registry);
         self
     }
@@ -424,10 +424,8 @@ impl LlmProvider for OpenAiProvider {
 
     fn cost_rates(&self, model: &str) -> CostRates {
         if let Some(ref registry) = self.pricing {
-            if let Some(rates) = registry.get_fuzzy(&self.provider_name, model) {
-                if rates.input_per_million > 0.0 {
-                    return rates.clone();
-                }
+            if let Some(rates) = registry.get_pricing(&self.provider_name, model) {
+                return rates;
             }
         }
         // Hardcoded fallback

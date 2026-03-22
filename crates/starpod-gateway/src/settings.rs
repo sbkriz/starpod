@@ -400,56 +400,17 @@ async fn put_general(
 
 // ── Models ──────────────────────────────────────────────────────────────
 
-/// Well-known models per provider, returned by `GET /api/settings/models`.
-fn well_known_models() -> std::collections::HashMap<String, Vec<String>> {
-    let mut m = std::collections::HashMap::new();
-    m.insert("anthropic".into(), vec![
-        "claude-haiku-4-5".into(),
-        "claude-sonnet-4-6".into(),
-        "claude-opus-4-6".into(),
-    ]);
-    m.insert("openai".into(), vec![
-        "gpt-4o".into(),
-        "gpt-4o-mini".into(),
-        "gpt-4-turbo".into(),
-        "o3-mini".into(),
-    ]);
-    m.insert("gemini".into(), vec![
-        "gemini-2.5-pro".into(),
-        "gemini-2.5-flash".into(),
-        "gemini-2.0-flash".into(),
-    ]);
-    m.insert("groq".into(), vec![
-        "llama-3.3-70b-versatile".into(),
-        "llama-3.1-8b-instant".into(),
-    ]);
-    m.insert("deepseek".into(), vec![
-        "deepseek-chat".into(),
-        "deepseek-reasoner".into(),
-    ]);
-    m.insert("openrouter".into(), vec![
-        "anthropic/claude-haiku-4-5".into(),
-        "anthropic/claude-sonnet-4-6".into(),
-        "openai/gpt-4o".into(),
-        "google/gemini-2.5-pro".into(),
-        "meta-llama/llama-3.3-70b-instruct".into(),
-    ]);
-    m.insert("ollama".into(), vec![]);
-    m
-}
-
 async fn get_models(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> ApiResult<ModelsResponse> {
     let auth_user = authenticate_request(&state, &headers).await?;
-    // Settings routes require admin role when auth is active
     if let Some(ref u) = auth_user {
         if u.role != starpod_auth::Role::Admin {
             return Err(err(StatusCode::FORBIDDEN, "Admin access required"));
         }
     }
-    Ok(Json(ModelsResponse { models: well_known_models() }))
+    Ok(Json(ModelsResponse { models: state.model_registry.models_by_provider() }))
 }
 
 // ── Memory ──────────────────────────────────────────────────────────────
@@ -1868,6 +1829,7 @@ mod tests {
             rate_limiter,
             config: RwLock::new(config),
             paths,
+            model_registry: Arc::new(agent_sdk::models::ModelRegistry::with_defaults()),
             events_tx,
         });
 
@@ -2097,8 +2059,9 @@ mod tests {
     }
 
     #[test]
-    fn well_known_models_all_providers_present() {
-        let m = well_known_models();
+    fn model_registry_all_providers_present() {
+        let reg = agent_sdk::models::ModelRegistry::with_defaults();
+        let m = reg.models_by_provider();
         assert!(m.contains_key("anthropic"));
         assert!(m.contains_key("openai"));
         assert!(m.contains_key("gemini"));

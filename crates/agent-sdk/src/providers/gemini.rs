@@ -18,7 +18,7 @@ use crate::client::{
     MessageResponse, RetryConfig, StreamEvent,
 };
 use crate::error::{AgentError, Result};
-use crate::pricing::PricingRegistry;
+use crate::models::ModelRegistry;
 use crate::provider::{CostRates, LlmProvider, ProviderCapabilities};
 
 const DEFAULT_GEMINI_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -29,7 +29,7 @@ pub struct GeminiProvider {
     api_key: String,
     base_url: String,
     retry_config: RetryConfig,
-    pricing: Option<Arc<PricingRegistry>>,
+    pricing: Option<Arc<ModelRegistry>>,
 }
 
 impl GeminiProvider {
@@ -56,7 +56,7 @@ impl GeminiProvider {
     }
 
     /// Attach a pricing registry for cost lookups.
-    pub fn with_pricing(mut self, registry: Arc<PricingRegistry>) -> Self {
+    pub fn with_pricing(mut self, registry: Arc<ModelRegistry>) -> Self {
         self.pricing = Some(registry);
         self
     }
@@ -400,10 +400,8 @@ impl LlmProvider for GeminiProvider {
 
     fn cost_rates(&self, model: &str) -> CostRates {
         if let Some(ref registry) = self.pricing {
-            if let Some(rates) = registry.get_fuzzy("gemini", model) {
-                if rates.input_per_million > 0.0 {
-                    return rates.clone();
-                }
+            if let Some(rates) = registry.get_pricing("gemini", model) {
+                return rates;
             }
         }
         // Hardcoded fallback

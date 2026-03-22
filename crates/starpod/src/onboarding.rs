@@ -1,45 +1,27 @@
 //! Workspace and agent scaffolding helpers.
 
+use std::sync::LazyLock;
+
+use agent_sdk::models::ModelRegistry;
 use colored::Colorize;
 use dialoguer::{Input, Password, Select, theme::ColorfulTheme};
 
-/// Provider choices available during init.
-pub const PROVIDERS: &[&str] = &[
-    "anthropic",
-    "openai",
-    "gemini",
-    "groq",
-    "deepseek",
-    "openrouter",
-    "ollama",
-];
+/// Shared model registry (embedded defaults).
+static REGISTRY: LazyLock<ModelRegistry> = LazyLock::new(ModelRegistry::with_defaults);
 
-/// Default models per provider.
-pub fn default_model(provider: &str) -> &'static str {
-    match provider {
-        "anthropic" => "claude-haiku-4-5",
-        "openai" => "gpt-4o",
-        "gemini" => "gemini-2.5-pro",
-        "groq" => "llama-3.3-70b-versatile",
-        "deepseek" => "deepseek-chat",
-        "openrouter" => "anthropic/claude-haiku-4-5",
-        "ollama" => "llama3.3",
-        _ => "claude-haiku-4-5",
-    }
+/// Provider choices available during init, derived from the model registry.
+pub fn providers() -> Vec<&'static str> {
+    REGISTRY.provider_names()
 }
 
-/// Environment variable name for a provider's API key.
-pub fn env_key_for_provider(provider: &str) -> Option<&'static str> {
-    match provider {
-        "anthropic" => Some("ANTHROPIC_API_KEY"),
-        "openai" => Some("OPENAI_API_KEY"),
-        "gemini" => Some("GEMINI_API_KEY"),
-        "groq" => Some("GROQ_API_KEY"),
-        "deepseek" => Some("DEEPSEEK_API_KEY"),
-        "openrouter" => Some("OPENROUTER_API_KEY"),
-        "ollama" => None, // local, no key needed
-        _ => None,
-    }
+/// Default model for a provider, from the model registry.
+pub fn default_model(provider: &str) -> &str {
+    REGISTRY.default_model(provider).unwrap_or("claude-haiku-4-5")
+}
+
+/// Environment variable name for a provider's API key, from the model registry.
+pub fn env_key_for_provider(provider: &str) -> Option<&str> {
+    REGISTRY.api_key_env(provider)
 }
 
 /// Collected answers from the interactive wizard.
@@ -65,14 +47,15 @@ pub fn run_wizard() -> Option<InitAnswers> {
     println!("  Let's set up your workspace.\n");
 
     // 1. Provider selection
+    let provider_list = providers();
     let provider_idx = Select::with_theme(&theme)
         .with_prompt("Which LLM provider?")
-        .items(PROVIDERS)
+        .items(&provider_list)
         .default(0)
         .interact_opt()
         .ok()
         .flatten()?;
-    let provider = PROVIDERS[provider_idx];
+    let provider = provider_list[provider_idx];
 
     // 2. Model (pre-filled with default for chosen provider)
     let default_model = default_model(provider);
@@ -337,7 +320,7 @@ mod tests {
 
     #[test]
     fn every_provider_generates_valid_toml() {
-        for &provider in PROVIDERS {
+        for &provider in &providers() {
             let model = default_model(provider);
             let config_str = generate_workspace_config_with(provider, model);
             let config: starpod_core::AgentConfig = toml::from_str(&config_str)
@@ -421,7 +404,7 @@ mod tests {
 
     #[test]
     fn every_provider_has_a_default_model() {
-        for &provider in PROVIDERS {
+        for provider in &providers() {
             let model = default_model(provider);
             assert!(!model.is_empty(), "provider '{}' has no default model", provider);
         }
@@ -474,7 +457,8 @@ mod tests {
 
     #[test]
     fn providers_list_is_not_empty() {
-        assert!(!PROVIDERS.is_empty());
-        assert!(PROVIDERS.contains(&"anthropic"));
+        let p = providers();
+        assert!(!p.is_empty());
+        assert!(p.contains(&"anthropic"));
     }
 }
