@@ -195,20 +195,22 @@ export default function CostsTab() {
   return (
     <>
       {/* Period selector */}
-      <div className="flex gap-1 mb-4">
-        {PERIODS.map(p => (
-          <button
-            key={p.value}
-            onClick={() => setPeriod(p.value)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-colors ${
-              period === p.value
-                ? 'bg-accent/15 text-accent'
-                : 'text-muted hover:text-secondary hover:bg-elevated'
-            }`}
-          >
-            {p.label}
-          </button>
-        ))}
+      <div className="flex items-center gap-3 mb-5">
+        <div className="flex gap-1 bg-surface border border-border-subtle rounded-lg p-1">
+          {PERIODS.map(p => (
+            <button
+              key={p.value}
+              onClick={() => setPeriod(p.value)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-all ${
+                period === p.value
+                  ? 'bg-accent text-white shadow-sm'
+                  : 'text-muted hover:text-secondary'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {error && (
@@ -222,26 +224,19 @@ export default function CostsTab() {
       {data && (
         <>
           {/* Overview */}
-          <Card title="Overview">
-            <div className="grid grid-cols-4 gap-4 py-2">
-              <div className="text-center">
-                <div className="text-2xl font-semibold text-primary">{formatCost(data.total_cost_usd)}</div>
-                <div className="text-xs text-muted mt-1">Total cost</div>
+          <div className="grid grid-cols-4 gap-3 mb-4">
+            {[
+              { label: 'Total cost', value: formatCost(data.total_cost_usd), accent: true },
+              { label: 'Total tokens', value: formatTokens(data.total_input_tokens + data.total_output_tokens) },
+              { label: 'Cached', value: formatTokens((data.total_cache_read || 0) + (data.total_cache_write || 0)) },
+              { label: 'Turns', value: data.total_turns.toLocaleString() },
+            ].map(s => (
+              <div key={s.label} className="s-stat-card">
+                <div className="text-[11px] text-muted uppercase tracking-wider font-medium">{s.label}</div>
+                <div className={`text-xl font-semibold mt-1 font-mono ${s.accent ? 'text-accent' : 'text-primary'}`}>{s.value}</div>
               </div>
-              <div className="text-center">
-                <div className="text-2xl font-semibold text-primary">{formatTokens(data.total_input_tokens + data.total_output_tokens)}</div>
-                <div className="text-xs text-muted mt-1">Total tokens</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-semibold text-primary">{formatTokens((data.total_cache_read || 0) + (data.total_cache_write || 0))}</div>
-                <div className="text-xs text-muted mt-1">Cached</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-semibold text-primary">{data.total_turns.toLocaleString()}</div>
-                <div className="text-xs text-muted mt-1">Turns</div>
-              </div>
-            </div>
-          </Card>
+            ))}
+          </div>
 
           {/* Daily chart */}
           {data.by_day && data.by_day.length > 0 && (
@@ -253,60 +248,64 @@ export default function CostsTab() {
           {/* By user */}
           {data.by_user.length > 0 && (
             <Card title="By User">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-muted text-xs">
-                    <th className="text-left py-1.5 pl-3 font-medium">User</th>
-                    <th className="text-right py-1.5 font-medium">Cost</th>
-                    <th className="text-right py-1.5 font-medium">Input</th>
-                    <th className="text-right py-1.5 font-medium">Cached</th>
-                    <th className="text-right py-1.5 font-medium">Output</th>
-                    <th className="text-right py-1.5 pr-3 font-medium">Turns</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.by_user.map(u => (
-                    <tr key={u.user_id} className="border-t border-border-subtle">
-                      <td className="py-1.5 pl-3 text-primary">{u.user_id}</td>
-                      <td className="py-1.5 text-right text-primary font-mono text-xs">{formatCost(u.total_cost_usd)}</td>
-                      <td className="py-1.5 text-right text-muted font-mono text-xs">{formatTokens(u.total_input_tokens)}</td>
-                      <td className="py-1.5 text-right text-dim font-mono text-xs">{formatTokens((u.total_cache_read || 0) + (u.total_cache_write || 0))}</td>
-                      <td className="py-1.5 text-right text-muted font-mono text-xs">{formatTokens(u.total_output_tokens)}</td>
-                      <td className="py-1.5 pr-3 text-right text-muted">{u.total_turns}</td>
+              <div className="s-table-wrap">
+                <table className="s-table">
+                  <thead>
+                    <tr>
+                      <th className="text-left">User</th>
+                      <th className="text-right">Cost</th>
+                      <th className="text-right">Input</th>
+                      <th className="text-right">Cached</th>
+                      <th className="text-right">Output</th>
+                      <th className="text-right">Turns</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {data.by_user.map(u => (
+                      <tr key={u.user_id}>
+                        <td className="text-primary">{u.user_id}</td>
+                        <td className="text-right text-primary font-mono">{formatCost(u.total_cost_usd)}</td>
+                        <td className="text-right text-muted font-mono">{formatTokens(u.total_input_tokens)}</td>
+                        <td className="text-right text-dim font-mono">{formatTokens((u.total_cache_read || 0) + (u.total_cache_write || 0))}</td>
+                        <td className="text-right text-muted font-mono">{formatTokens(u.total_output_tokens)}</td>
+                        <td className="text-right text-muted">{u.total_turns}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </Card>
           )}
 
           {/* By model */}
           {data.by_model.length > 0 && (
             <Card title="By Model">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-muted text-xs">
-                    <th className="text-left py-1.5 pl-3 font-medium">Model</th>
-                    <th className="text-right py-1.5 font-medium">Cost</th>
-                    <th className="text-right py-1.5 font-medium">Input</th>
-                    <th className="text-right py-1.5 font-medium">Cached</th>
-                    <th className="text-right py-1.5 font-medium">Output</th>
-                    <th className="text-right py-1.5 pr-3 font-medium">Turns</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.by_model.map(m => (
-                    <tr key={m.model} className="border-t border-border-subtle">
-                      <td className="py-1.5 pl-3 text-primary font-mono text-xs">{m.model || 'unknown'}</td>
-                      <td className="py-1.5 text-right text-primary font-mono text-xs">{formatCost(m.total_cost_usd)}</td>
-                      <td className="py-1.5 text-right text-muted font-mono text-xs">{formatTokens(m.total_input_tokens)}</td>
-                      <td className="py-1.5 text-right text-dim font-mono text-xs">{formatTokens((m.total_cache_read || 0) + (m.total_cache_write || 0))}</td>
-                      <td className="py-1.5 text-right text-muted font-mono text-xs">{formatTokens(m.total_output_tokens)}</td>
-                      <td className="py-1.5 pr-3 text-right text-muted">{m.total_turns}</td>
+              <div className="s-table-wrap">
+                <table className="s-table">
+                  <thead>
+                    <tr>
+                      <th className="text-left">Model</th>
+                      <th className="text-right">Cost</th>
+                      <th className="text-right">Input</th>
+                      <th className="text-right">Cached</th>
+                      <th className="text-right">Output</th>
+                      <th className="text-right">Turns</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {data.by_model.map(m => (
+                      <tr key={m.model}>
+                        <td className="text-primary font-mono">{m.model || 'unknown'}</td>
+                        <td className="text-right text-primary font-mono">{formatCost(m.total_cost_usd)}</td>
+                        <td className="text-right text-muted font-mono">{formatTokens(m.total_input_tokens)}</td>
+                        <td className="text-right text-dim font-mono">{formatTokens((m.total_cache_read || 0) + (m.total_cache_write || 0))}</td>
+                        <td className="text-right text-muted font-mono">{formatTokens(m.total_output_tokens)}</td>
+                        <td className="text-right text-muted">{m.total_turns}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </Card>
           )}
         </>
