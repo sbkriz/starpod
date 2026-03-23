@@ -16,7 +16,7 @@ export { StarpodIcon }
 
 export default function Logo({ large }) {
   return (
-    <div className={`flex items-center select-none ${large ? 'gap-3' : 'gap-2'}`}>
+    <div className={`flex items-center justify-center select-none ${large ? 'gap-3' : 'gap-2'}`}>
       <StarpodIcon className={large ? 'w-10 h-10 text-primary' : 'w-5 h-5 text-primary'} />
       <span className={`font-display font-bold uppercase tracking-[0.02em] text-primary ${large ? 'text-4xl' : 'text-sm'}`}>
         Starpod
