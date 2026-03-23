@@ -216,16 +216,6 @@ function AppInner() {
     return () => document.removeEventListener('keydown', handler)
   }, [dispatch, settingsVisible, previewUrl, state.sidebarOpen])
 
-  // Settings is a full-page takeover
-  if (settingsVisible) {
-    return (
-      <>
-        <SettingsView />
-        <ToastContainer ref={toastsRef} onNavigateToSession={handleToastNavigate} />
-      </>
-    )
-  }
-
   return (
     <>
       {/* Mobile sidebar overlay */}
@@ -252,15 +242,15 @@ function AppInner() {
 
         {/* Main app */}
         <div id="app" role="main" className="flex flex-col min-w-0 flex-1">
-          {!cronVisible && !filesVisible && (
-            <Header />
-          )}
-          {cronVisible ? (
+          {settingsVisible ? (
+            <SettingsView />
+          ) : cronVisible ? (
             <CronJobsView />
           ) : filesVisible ? (
             <FilesView />
           ) : (
             <>
+              <Header />
               <Chat ref={chatRef} wsRef={wsRef} onSendPrompt={(text) => handleSend(text, [])} />
               <InputBar
                 onSend={handleSend}

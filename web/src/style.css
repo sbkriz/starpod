@@ -1577,14 +1577,6 @@ button.copy-btn.copied { color: var(--color-ok); border-color: var(--color-ok); 
     min-height: 44px;
   }
 
-  /* Settings sidebar: hide on mobile, show as dropdown */
-  .settings-sidebar {
-    display: none !important;
-  }
-  .settings-mobile-nav {
-    display: flex !important;
-  }
-
   /* Safe area insets */
   .input-bar-safe { padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); }
   header { padding-top: env(safe-area-inset-top, 0px); }
@@ -1602,7 +1594,14 @@ button.copy-btn.copied { color: var(--color-ok); border-color: var(--color-ok); 
 
 /* ── Settings layout ── */
 .settings-sidebar { display: flex; }
-.settings-mobile-nav { display: none !important; }
+.settings-desktop-header { display: flex; }
+.settings-mobile-nav { display: none; }
+
+@media (max-width: 768px) {
+  .settings-sidebar { display: none; }
+  .settings-desktop-header { display: none; }
+  .settings-mobile-nav { display: flex; }
+}
 
 /* ── JSON syntax colors (file preview) ── */
 .json-key { color: #93c5fd; }

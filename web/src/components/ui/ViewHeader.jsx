@@ -6,7 +6,7 @@ export default function ViewHeader({ title, left, right, border = true }) {
   const { dispatch } = useApp()
 
   return (
-    <div className={`flex items-center justify-between px-3 h-12 shrink-0${border ? ' border-b border-border-subtle' : ''}`}>
+    <div className={`flex items-center justify-between gap-3 px-3 h-12 shrink-0${border ? ' border-b border-border-subtle' : ''}`}>
       <div className="flex items-center gap-2">
         <button
           onClick={() => dispatch({ type: 'OPEN_SIDEBAR' })}

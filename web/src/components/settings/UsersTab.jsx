@@ -355,7 +355,7 @@ export default function UsersTab() {
                         <span className="text-xs text-primary">Filesystem Access</span>
                         <span className="text-[10px] text-dim">Browse and edit files in the instance sandbox</span>
                       </div>
-                      <label className="s-toggle-wrap">
+                      <label className="s-toggle">
                         <input
                           type="checkbox"
                           checked={u.filesystem_enabled || false}
@@ -370,9 +370,8 @@ export default function UsersTab() {
                               if (r.ok) await load()
                             } catch {}
                           }}
-                          className="s-toggle-input"
                         />
-                        <span className="s-toggle-track"><span className="s-toggle-thumb" /></span>
+                        <div className="s-toggle-track" />
                       </label>
                     </div>
                   </div>
