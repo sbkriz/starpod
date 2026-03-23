@@ -12,7 +12,8 @@ function modelLabel(spec) {
 
 function Header({ onToggleSidebar, onNewChat }) {
   const { state, dispatch } = useApp()
-  const { wsStatus, sidebarOpen, previewUrl, currentSessionId, sessions, selectedModel } = state
+  const { wsStatus, sidebarOpen, previewUrl, currentSessionId, sessions, selectedModel, cronVisible, filesVisible } = state
+  const isChatMode = !cronVisible && !filesVisible
   const sidebarVisible = sidebarOpen && !previewUrl
   const isTransient = sidebarOpen && !!previewUrl
 
@@ -72,60 +73,68 @@ function Header({ onToggleSidebar, onNewChat }) {
           <SidebarOpenIcon />
         </IconButton>
       )}
-      <IconButton onClick={newChat} id="new-chat-header-btn" title="New chat" aria-label="New chat">
-        <ComposeIcon className="w-4 h-4 stroke-current fill-none stroke-2" />
-      </IconButton>
+      {isChatMode && (
+        <IconButton onClick={newChat} id="new-chat-header-btn" title="New chat" aria-label="New chat">
+          <ComposeIcon className="w-4 h-4 stroke-current fill-none stroke-2" />
+        </IconButton>
+      )}
 
-      {/* Model selector */}
-      <div className="relative" ref={dropdownRef}>
-        <button
-          className="model-pill"
-          onClick={hasMultiple ? () => setDropdownOpen(!dropdownOpen) : () => {
-            dispatch({ type: 'SHOW_SETTINGS' })
-            dispatch({ type: 'SET_SETTINGS_TAB', payload: 'general' })
-          }}
-          title={hasMultiple ? 'Switch model' : 'Change model'}
-        >
-          <span>{activeModel ? modelLabel(activeModel) : agentName}</span>
-          {hasMultiple && <ChevronDownIcon className="w-2.5 h-2.5 opacity-50" />}
-        </button>
+      {/* Model selector — chat mode only */}
+      {isChatMode && (
+        <div className="relative" ref={dropdownRef}>
+          <button
+            className="model-pill"
+            onClick={hasMultiple ? () => setDropdownOpen(!dropdownOpen) : () => {
+              dispatch({ type: 'SHOW_SETTINGS' })
+              dispatch({ type: 'SET_SETTINGS_TAB', payload: 'general' })
+            }}
+            title={hasMultiple ? 'Switch model' : 'Change model'}
+          >
+            <span>{activeModel ? modelLabel(activeModel) : agentName}</span>
+            {hasMultiple && <ChevronDownIcon className="w-2.5 h-2.5 opacity-50" />}
+          </button>
 
-        {dropdownOpen && (
-          <div className="model-dropdown">
-            {models.map(spec => (
-              <button
-                key={spec}
-                className={`model-dropdown-item${spec === activeModel ? ' active' : ''}`}
-                onClick={() => selectModel(spec)}
-              >
-                <span className="model-dropdown-name">{modelLabel(spec)}</span>
-                <span className="model-dropdown-provider">{spec.split('/')[0]}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+          {dropdownOpen && (
+            <div className="model-dropdown">
+              {models.map(spec => (
+                <button
+                  key={spec}
+                  className={`model-dropdown-item${spec === activeModel ? ' active' : ''}`}
+                  onClick={() => selectModel(spec)}
+                >
+                  <span className="model-dropdown-name">{modelLabel(spec)}</span>
+                  <span className="model-dropdown-provider">{spec.split('/')[0]}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* Session title (centered) */}
-      {sessionTitle && (
+      {/* Session title (centered) — chat mode only */}
+      {isChatMode && sessionTitle && (
         <div className="flex-1 min-w-0 flex justify-center">
           <span className="text-xs text-muted truncate max-w-[300px] select-none">
             {sessionTitle}
           </span>
         </div>
       )}
-      {!sessionTitle && <div className="flex-1" />}
+      {!(isChatMode && sessionTitle) && <div className="flex-1" />}
 
       {/* Right side */}
       <div className="flex items-center gap-1.5">
-        <span
-          className={`w-2 h-2 rounded-full shrink-0 dot-${wsStatus}`}
-          title={`WebSocket: ${wsStatus}`}
-        />
-        {wsStatus !== 'connected' && (
-          <span className="text-[11px] text-muted select-none">
-            {wsStatus === 'connecting' ? 'connecting...' : 'offline'}
-          </span>
+        {isChatMode && (
+          <>
+            <span
+              className={`w-2 h-2 rounded-full shrink-0 dot-${wsStatus}`}
+              title={`WebSocket: ${wsStatus}`}
+            />
+            {wsStatus !== 'connected' && (
+              <span className="text-[11px] text-muted select-none">
+                {wsStatus === 'connecting' ? 'connecting...' : 'offline'}
+              </span>
+            )}
+          </>
         )}
         <IconButton
           onClick={() => dispatch({ type: state.settingsVisible ? 'HIDE_SETTINGS' : 'SHOW_SETTINGS' })}
