@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useUser } from './AuthGate'
 import { authHeaders } from '../lib/api'
+import ViewHeader from './ui/ViewHeader'
 
 function formatEpoch(epoch) {
   if (!epoch) return '—'
@@ -471,22 +472,23 @@ export default function CronJobsView() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      <ViewHeader
+        title="Cron Jobs"
+        right={!showForm && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="px-2.5 py-1.5 text-[12px] font-mono text-secondary hover:text-primary hover:bg-elevated rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+          >
+            <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M8 3v10M3 8h10" />
+            </svg>
+            Add job
+          </button>
+        )}
+      />
+      <div className="flex-1 overflow-y-auto">
       <div className="max-w-[740px] mx-auto px-5 py-6">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-primary text-lg font-semibold">Cron Jobs</h1>
-          {!showForm && (
-            <button
-              onClick={() => setShowForm(true)}
-              className="text-[12px] font-mono text-muted hover:text-primary border border-border-main hover:border-accent/40 px-3 py-1.5 rounded-md transition-colors flex items-center gap-1.5"
-            >
-              <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M8 3v10M3 8h10" />
-              </svg>
-              Add job
-            </button>
-          )}
-        </div>
         {showForm && (
           <CreateJobForm
             onCreated={handleCreated}
@@ -517,6 +519,7 @@ export default function CronJobsView() {
             ))}
           </div>
         )}
+      </div>
       </div>
     </div>
   )

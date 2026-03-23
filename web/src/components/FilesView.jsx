@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useApp } from '../contexts/AppContext'
 import { apiHeaders } from '../lib/api'
 import { formatText } from '../lib/markdown'
+import ViewHeader from './ui/ViewHeader'
 
 function formatSize(bytes) {
   if (bytes === 0) return '—'
@@ -455,20 +456,9 @@ export default function FilesView() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 h-12 border-b border-border-subtle shrink-0">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => dispatch({ type: 'HIDE_FILES' })}
-            className="text-muted hover:text-primary transition-colors cursor-pointer"
-          >
-            <svg className="w-4 h-4 stroke-current fill-none stroke-2" viewBox="0 0 24 24" strokeLinecap="round">
-              <line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" />
-            </svg>
-          </button>
-          <h2 className="text-sm font-semibold text-primary tracking-tight">Files</h2>
-        </div>
-        <div className="flex items-center gap-2">
+      <ViewHeader
+        title="Files"
+        right={<>
           <button
             onClick={() => { setShowCreate('folder'); setNewName('') }}
             className="px-2.5 py-1.5 text-[12px] font-mono text-secondary hover:text-primary hover:bg-elevated rounded-lg transition-colors cursor-pointer"
@@ -481,8 +471,8 @@ export default function FilesView() {
           >
             + File
           </button>
-        </div>
-      </div>
+        </>}
+      />
 
       {/* Breadcrumbs */}
       <div className="flex items-center gap-1 px-5 py-2 text-[12px] font-mono text-muted border-b border-border-subtle shrink-0 overflow-x-auto">
@@ -695,7 +685,7 @@ export default function FilesView() {
             </div>
 
             {/* File content */}
-            <div className={`flex-1 overflow-auto ${fileType === 'pdf' || fileType === 'html' ? '' : 'p-4'}`}>
+            <div className={`flex-1 overflow-auto ${fileType === 'pdf' || fileType === 'html' || fileType === 'csv' ? '' : 'p-4'}`}>
               {renderFileContent()}
             </div>
           </div>

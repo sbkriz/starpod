@@ -244,17 +244,17 @@ function AppInner() {
         {/* Sidebar */}
         <aside id="sidebar" className={`${state.sidebarOpen ? 'open' : ''} ${previewUrl ? 'transient' : ''}`}
           onMouseLeave={(e) => e.currentTarget.classList.remove('peeking')}>
-          <div id="sidebar-inner">
-            <Sidebar
-              onSelectSession={handleSelectSession}
-              onNewChat={handleNewChat}
-            />
-          </div>
+          <Sidebar
+            onSelectSession={handleSelectSession}
+            onNewChat={handleNewChat}
+          />
         </aside>
 
         {/* Main app */}
         <div id="app" role="main" className="flex flex-col min-w-0 flex-1">
-          <Header onNewChat={handleNewChat} onToggleSidebar={() => { if (!state.sidebarOpen) fetchSessionList() }} />
+          {!cronVisible && !filesVisible && (
+            <Header />
+          )}
           {cronVisible ? (
             <CronJobsView />
           ) : filesVisible ? (

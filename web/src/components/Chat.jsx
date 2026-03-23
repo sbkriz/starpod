@@ -288,7 +288,7 @@ const Chat = forwardRef(function Chat({ wsRef, onSendPrompt }, ref) {
       id="messages-scroll"
       className="flex-1 overflow-y-auto"
     >
-      <div className="max-w-[740px] mx-auto px-5 py-4 flex flex-col" id="messages">
+      <div className="max-w-[740px] mx-auto px-3 py-4 flex flex-col" id="messages">
         {!hasContent && (
           <Welcome onSendPrompt={handleSendPrompt} />
         )}

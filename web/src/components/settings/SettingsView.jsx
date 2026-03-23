@@ -1,5 +1,6 @@
 import { useApp } from '../../contexts/AppContext'
 import IconButton from '../ui/IconButton'
+import ViewHeader from '../ui/ViewHeader'
 import { BackIcon } from '../ui/Icons'
 import GeneralTab from './GeneralTab'
 import FileTab from './FileTab'
@@ -135,13 +136,10 @@ export default function SettingsView() {
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Mobile header — visible only on mobile via CSS */}
-        <div className="settings-mobile-nav hidden shrink-0 border-b border-border-subtle">
-          <div className="flex items-center gap-3 h-12 px-4">
-            <IconButton onClick={() => dispatch({ type: 'HIDE_SETTINGS' })} aria-label="Back">
-              <BackIcon />
-            </IconButton>
-            <h1 className="text-primary text-sm font-semibold">Settings</h1>
-            <div className="ml-auto">
+        <div className="settings-mobile-nav hidden shrink-0">
+          <ViewHeader
+            title="Settings"
+            right={
               <select
                 value={settingsActiveTab}
                 onChange={e => dispatch({ type: 'SET_SETTINGS_TAB', payload: e.target.value })}
@@ -155,8 +153,8 @@ export default function SettingsView() {
                   </optgroup>
                 ))}
               </select>
-            </div>
-          </div>
+            }
+          />
         </div>
 
         {/* Scrollable content */}

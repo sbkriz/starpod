@@ -74,12 +74,12 @@ html, body {
 
 /* ── Sidebar ── */
 #sidebar {
-  width: 0;
-  min-width: 0;
-  overflow: hidden;
+  width: 48px;
+  min-width: 48px;
+  overflow: visible;
   transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
               min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  border-right: 1px solid transparent;
+  border-right: 1px solid var(--color-border-subtle);
   background: var(--color-surface);
   flex-shrink: 0;
 }
@@ -87,21 +87,78 @@ html, body {
 #sidebar.open {
   width: var(--sidebar-w);
   min-width: var(--sidebar-w);
-  border-right-color: var(--color-border-subtle);
 }
 
+/* Rail: visible when collapsed, hidden when open */
+.sidebar-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0;
+  width: 48px;
+  height: 100%;
+}
+#sidebar.open .sidebar-rail {
+  display: none;
+}
+
+.sidebar-rail-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  color: var(--color-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.sidebar-rail-btn:hover {
+  color: var(--color-primary);
+  background: var(--color-elevated);
+}
+.sidebar-rail-btn.active {
+  color: var(--color-accent);
+  background: var(--color-accent-muted);
+}
+
+/* Rail tooltips */
+.sidebar-rail-btn {
+  position: relative;
+}
+.sidebar-rail-btn[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--color-elevated);
+  border: 1px solid var(--color-border-main);
+  color: var(--color-primary);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 10;
+}
+.sidebar-rail-btn[data-tooltip]:hover::after {
+  opacity: 1;
+}
+
+/* Inner: visible when open, hidden when collapsed */
 #sidebar-inner {
   width: var(--sidebar-w);
   height: 100%;
-  display: flex;
+  display: none;
   flex-direction: column;
-  opacity: 0;
-  transition: opacity 0.15s ease;
 }
 
 #sidebar.open #sidebar-inner {
-  opacity: 1;
-  transition-delay: 0.1s;
+  display: flex;
 }
 
 @media (max-width: 768px) {
@@ -109,11 +166,18 @@ html, body {
     position: fixed;
     inset: 0;
     width: 0;
+    min-width: 0;
     z-index: 100;
+    border-right-color: transparent;
+  }
+  #sidebar .sidebar-rail {
+    display: none;
   }
   #sidebar.open {
     width: min(var(--sidebar-w), 85vw);
+    min-width: min(var(--sidebar-w), 85vw);
     box-shadow: 20px 0 60px rgba(0,0,0,0.5);
+    border-right-color: var(--color-border-subtle);
   }
   #sidebar-inner {
     width: min(var(--sidebar-w), 85vw);
@@ -129,8 +193,27 @@ html, body {
   height: 100dvh;
 }
 
-/* Hide header new-chat button when sidebar is open (unless transient/preview mode) */
-#sidebar.open:not(.transient) ~ #app #new-chat-header-btn { display: none; }
+/* ── Mobile sidebar toggle (shown in section headers on mobile) ── */
+.mobile-sidebar-toggle {
+  display: none;
+}
+@media (max-width: 768px) {
+  .mobile-sidebar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    color: var(--color-muted);
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .mobile-sidebar-toggle:hover {
+    color: var(--color-primary);
+    background: var(--color-elevated);
+  }
+}
 
 /* ── Header ── */
 #main-header {
@@ -143,7 +226,7 @@ html, body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
+  padding: 4px 0px;
   border: none;
   border-radius: 8px;
   background: none;
@@ -456,9 +539,8 @@ button.copy-btn.copied { color: var(--color-ok); border-color: var(--color-ok); 
               min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-#sidebar.transient #sidebar-inner {
-  opacity: 0;
-  transition: opacity 0.15s ease;
+#sidebar.transient .sidebar-rail {
+  display: none;
 }
 
 #sidebar.transient.peeking {
@@ -469,8 +551,7 @@ button.copy-btn.copied { color: var(--color-ok); border-color: var(--color-ok); 
 }
 
 #sidebar.transient.peeking #sidebar-inner {
-  opacity: 1;
-  transition-delay: 0.1s;
+  display: flex;
 }
 
 /* ── Markdown body ── */

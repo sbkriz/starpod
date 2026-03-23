@@ -180,7 +180,7 @@ function InputBar({ onSend, disabled }) {
 
   return (
     <div className="shrink-0 pt-2 pb-4 w-full input-bar-safe">
-      <div className="max-w-[740px] mx-auto px-5">
+      <div className="max-w-[740px] mx-auto px-3">
         {/* Attachment preview */}
         {pendingAttachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
