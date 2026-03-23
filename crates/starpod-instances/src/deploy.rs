@@ -31,6 +31,31 @@ pub struct AgentResponse {
 pub struct UploadedFile {
     pub path: String,
     pub size: u64,
+    #[serde(default)]
+    pub md5_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncManifestRequest {
+    pub files: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SyncManifestResponse {
+    pub to_upload: Vec<String>,
+    pub to_download: Vec<UploadedFile>,
+    pub to_delete_remote: Vec<String>,
+    pub to_delete_local: Vec<String>,
+}
+
+/// Summary of a push or pull operation.
+#[derive(Debug)]
+pub struct SyncSummary {
+    pub uploaded: usize,
+    pub downloaded: usize,
+    pub deleted_remote: usize,
+    pub deleted_local: usize,
+    pub unchanged: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +100,32 @@ pub struct CreateInstanceRequest {
     pub agent_id: String,
     pub zone: Option<String>,
     pub machine_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variable_overrides: Option<HashMap<String, String>>,
+}
+
+// ── Deploy config types ──────────────────────────────────────────────────
+
+/// Secret declaration status from deploy.toml readiness check.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretStatusInfo {
+    pub key: String,
+    pub required: bool,
+    #[serde(default)]
+    pub description: String,
+    pub present: bool,
+    pub scope: Option<String>,
+    pub hint: Option<String>,
+}
+
+/// Deploy readiness response from `GET /agents/{id}/deploy-config`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeployReadiness {
+    pub version: u32,
+    pub variables: HashMap<String, String>,
+    pub secrets: Vec<SecretStatusInfo>,
+    pub ready: bool,
+    pub missing_required: Vec<String>,
 }
 
 /// Summary of what was deployed.
@@ -216,7 +267,167 @@ impl DeployClient {
             .map_err(|e| StarpodError::Channel(format!("Invalid response: {}", e)))
     }
 
+    // ── Deploy Config ─────────────────────────────────────────────────
+
+    /// Get the deploy config readiness for an agent.
+    pub async fn get_deploy_config(&self, agent_id: &str) -> Result<Option<DeployReadiness>> {
+        debug!(agent_id = %agent_id, "Fetching deploy config");
+        let resp = self
+            .auth(
+                self.client
+                    .get(self.url(&format!("/agents/{}/deploy-config", agent_id))),
+            )
+            .send()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Failed to get deploy config: {}", e)))?;
+
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(StarpodError::Channel(format!(
+                "Get deploy config failed ({}): {}",
+                status, body
+            )));
+        }
+
+        let config = resp
+            .json::<DeployReadiness>()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Invalid response: {}", e)))?;
+        Ok(Some(config))
+    }
+
     // ── Secrets ───────────────────────────────────────────────────────
+
+    /// List secrets for an agent (returns metadata only, never values).
+    pub async fn list_agent_secrets(&self, agent_id: &str) -> Result<Vec<SecretResponse>> {
+        debug!(agent_id = %agent_id, "Listing agent secrets");
+        let resp = self
+            .auth(
+                self.client
+                    .get(self.url(&format!("/agents/{}/secrets", agent_id))),
+            )
+            .send()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Failed to list secrets: {}", e)))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(StarpodError::Channel(format!(
+                "List secrets failed ({}): {}",
+                status, body
+            )));
+        }
+
+        resp.json::<Vec<SecretResponse>>()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Invalid response: {}", e)))
+    }
+
+    /// List user-global secrets.
+    pub async fn list_user_secrets(&self) -> Result<Vec<SecretResponse>> {
+        debug!("Listing user-global secrets");
+        let resp = self
+            .auth(self.client.get(self.url("/secrets")))
+            .send()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Failed to list secrets: {}", e)))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(StarpodError::Channel(format!(
+                "List secrets failed ({}): {}",
+                status, body
+            )));
+        }
+
+        resp.json::<Vec<SecretResponse>>()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Invalid response: {}", e)))
+    }
+
+    /// Set a user-global secret.
+    pub async fn set_user_secret(&self, key: &str, value: &str) -> Result<SecretResponse> {
+        debug!(key = %key, "Setting user-global secret");
+        let resp = self
+            .auth(self.client.post(self.url("/secrets")))
+            .json(&CreateSecretRequest {
+                key: key.to_string(),
+                value: value.to_string(),
+            })
+            .send()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Failed to set secret: {}", e)))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(StarpodError::Channel(format!(
+                "Set secret failed ({}): {}",
+                status, body
+            )));
+        }
+
+        resp.json::<SecretResponse>()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Invalid response: {}", e)))
+    }
+
+    /// Delete a user-global secret by ID.
+    pub async fn delete_user_secret(&self, secret_id: &str) -> Result<()> {
+        debug!(secret_id = %secret_id, "Deleting user-global secret");
+        let resp = self
+            .auth(
+                self.client
+                    .delete(self.url(&format!("/secrets/{}", secret_id))),
+            )
+            .send()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Failed to delete secret: {}", e)))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(StarpodError::Channel(format!(
+                "Delete secret failed ({}): {}",
+                status, body
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Delete an agent-scoped secret by ID.
+    pub async fn delete_agent_secret(&self, agent_id: &str, secret_id: &str) -> Result<()> {
+        debug!(agent_id = %agent_id, secret_id = %secret_id, "Deleting agent secret");
+        let resp = self
+            .auth(
+                self.client.delete(self.url(&format!(
+                    "/agents/{}/secrets/{}",
+                    agent_id, secret_id
+                ))),
+            )
+            .send()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Failed to delete secret: {}", e)))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(StarpodError::Channel(format!(
+                "Delete secret failed ({}): {}",
+                status, body
+            )));
+        }
+
+        Ok(())
+    }
 
     /// Set an agent-scoped secret.
     pub async fn set_secret(
@@ -269,6 +480,7 @@ impl DeployClient {
                 agent_id: agent_id.to_string(),
                 zone: zone.map(String::from),
                 machine_type: machine_type.map(String::from),
+                variable_overrides: None,
             })
             .send()
             .await
@@ -433,6 +645,221 @@ impl DeployClient {
         })
     }
 
+    // ── Sync ──────────────────────────────────────────────────────────
+
+    /// Compute the diff between a local manifest and remote state.
+    pub async fn sync_manifest(
+        &self,
+        agent_id: &str,
+        manifest: &SyncManifestRequest,
+    ) -> Result<SyncManifestResponse> {
+        debug!(agent_id = %agent_id, files = manifest.files.len(), "Computing sync manifest");
+        let resp = self
+            .auth(
+                self.client
+                    .post(self.url(&format!("/agents/{}/sync", agent_id))),
+            )
+            .json(manifest)
+            .send()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Failed to sync: {}", e)))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(StarpodError::Channel(format!(
+                "Sync manifest failed ({}): {}",
+                status, body
+            )));
+        }
+
+        resp.json::<SyncManifestResponse>()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Invalid response: {}", e)))
+    }
+
+    /// Download a single file from the agent.
+    pub async fn download_file(
+        &self,
+        agent_id: &str,
+        file_path: &str,
+    ) -> Result<Vec<u8>> {
+        debug!(agent_id = %agent_id, path = %file_path, "Downloading file");
+        let resp = self
+            .auth(
+                self.client.get(self.url(&format!(
+                    "/agents/{}/files/{}",
+                    agent_id,
+                    urlencoding::encode(file_path)
+                ))),
+            )
+            .send()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Failed to download file: {}", e)))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(StarpodError::Channel(format!(
+                "Download file failed ({}): {}",
+                status, body
+            )));
+        }
+
+        resp.bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| StarpodError::Channel(format!("Failed to read body: {}", e)))
+    }
+
+    /// Delete a single file from the agent on the backend.
+    pub async fn delete_file(
+        &self,
+        agent_id: &str,
+        file_path: &str,
+    ) -> Result<()> {
+        debug!(agent_id = %agent_id, path = %file_path, "Deleting remote file");
+        let resp = self
+            .auth(
+                self.client.delete(self.url(&format!(
+                    "/agents/{}/files/{}",
+                    agent_id,
+                    urlencoding::encode(file_path)
+                ))),
+            )
+            .send()
+            .await
+            .map_err(|e| StarpodError::Channel(format!("Failed to delete file: {}", e)))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(StarpodError::Channel(format!(
+                "Delete file failed ({}): {}",
+                status, body
+            )));
+        }
+
+        Ok(())
+    }
+
+    // ── High-level push/pull ─────────────────────────────────────────
+
+    /// Push local agent files to the remote, uploading only changed files.
+    pub async fn push_agent(
+        &self,
+        agent_name: &str,
+        agent_dir: &Path,
+        skills_dir: Option<&Path>,
+    ) -> Result<SyncSummary> {
+        let agent = self.find_or_create_agent(agent_name).await?;
+        let agent_id = &agent.id;
+
+        // Collect local files and compute manifest
+        let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+        collect_files_recursive(agent_dir, "", &mut files)?;
+        if let Some(sd) = skills_dir {
+            if sd.exists() {
+                collect_files_recursive(sd, "skills/", &mut files)?;
+            }
+        }
+
+        let manifest = compute_manifest(&files);
+        let total_local = manifest.files.len();
+
+        // Get diff from server
+        let diff = self.sync_manifest(agent_id, &manifest).await?;
+
+        // Upload changed/new files
+        let files_map: HashMap<&str, &[u8]> = files
+            .iter()
+            .map(|(p, d)| (p.as_str(), d.as_slice()))
+            .collect();
+
+        for path in &diff.to_upload {
+            if let Some(data) = files_map.get(path.as_str()) {
+                self.upload_files(agent_id, vec![(path.clone(), data.to_vec())])
+                    .await?;
+            }
+        }
+
+        // Delete stale remote files
+        for path in &diff.to_delete_remote {
+            self.delete_file(agent_id, path).await?;
+        }
+
+        let unchanged = total_local - diff.to_upload.len();
+        Ok(SyncSummary {
+            uploaded: diff.to_upload.len(),
+            downloaded: 0,
+            deleted_remote: diff.to_delete_remote.len(),
+            deleted_local: 0,
+            unchanged,
+        })
+    }
+
+    /// Pull remote agent files to the local workspace, downloading only changed files.
+    pub async fn pull_agent(
+        &self,
+        agent_name: &str,
+        agent_dir: &Path,
+    ) -> Result<SyncSummary> {
+        let agents = self.list_agents().await?;
+        let agent = agents
+            .into_iter()
+            .find(|a| a.name == agent_name)
+            .ok_or_else(|| {
+                StarpodError::Channel(format!("Agent '{}' not found on remote", agent_name))
+            })?;
+        let agent_id = &agent.id;
+
+        // Collect local files and compute manifest
+        let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+        if agent_dir.exists() {
+            collect_files_recursive(agent_dir, "", &mut files)?;
+        }
+
+        let manifest = compute_manifest(&files);
+
+        // Get diff from server
+        let diff = self.sync_manifest(agent_id, &manifest).await?;
+
+        // Download changed/new files
+        for file_info in &diff.to_download {
+            let data = self.download_file(agent_id, &file_info.path).await?;
+            let dest = agent_dir.join(&file_info.path);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    StarpodError::Config(format!("Failed to create dir {:?}: {}", parent, e))
+                })?;
+            }
+            std::fs::write(&dest, data).map_err(|e| {
+                StarpodError::Config(format!("Failed to write {:?}: {}", dest, e))
+            })?;
+        }
+
+        // Delete local files no longer on remote
+        for path in &diff.to_delete_local {
+            let dest = agent_dir.join(path);
+            if dest.exists() {
+                std::fs::remove_file(&dest).map_err(|e| {
+                    StarpodError::Config(format!("Failed to delete {:?}: {}", dest, e))
+                })?;
+            }
+        }
+
+        let total_remote = diff.to_download.len()
+            + (manifest.files.len() - diff.to_delete_local.len());
+        let unchanged = total_remote.saturating_sub(diff.to_download.len());
+        Ok(SyncSummary {
+            uploaded: 0,
+            downloaded: diff.to_download.len(),
+            deleted_remote: 0,
+            deleted_local: diff.to_delete_local.len(),
+            unchanged,
+        })
+    }
+
     /// Find an existing agent by name or create a new one.
     async fn find_or_create_agent(&self, name: &str) -> Result<AgentResponse> {
         let agents = self.list_agents().await?;
@@ -489,6 +916,18 @@ fn collect_files_recursive(
     Ok(())
 }
 
+/// Compute a sync manifest from collected files: path → base64-encoded MD5 hash.
+fn compute_manifest(files: &[(String, Vec<u8>)]) -> SyncManifestRequest {
+    use base64::Engine;
+    let mut map = HashMap::new();
+    for (path, data) in files {
+        let digest = md5::compute(data);
+        let hash = base64::engine::general_purpose::STANDARD.encode(digest.as_ref());
+        map.insert(path.clone(), hash);
+    }
+    SyncManifestRequest { files: map }
+}
+
 /// Parse a .env file into a key-value map. Handles KEY=VALUE lines, ignoring comments and empty lines.
 pub fn parse_env_file(path: &Path) -> Result<HashMap<String, String>> {
     let content = std::fs::read_to_string(path).map_err(|e| {
@@ -517,4 +956,646 @@ pub fn parse_env_file(path: &Path) -> Result<HashMap<String, String>> {
     }
 
     Ok(env)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{method, path, path_regex};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    // --- compute_manifest tests ---
+
+    #[test]
+    fn manifest_produces_base64_md5() {
+        use base64::Engine;
+        let files = vec![("test.txt".to_string(), b"hello world".to_vec())];
+        let manifest = compute_manifest(&files);
+
+        assert_eq!(manifest.files.len(), 1);
+        let hash = manifest.files.get("test.txt").unwrap();
+
+        // Verify it matches: base64(md5("hello world"))
+        let expected_digest = md5::compute(b"hello world");
+        let expected = base64::engine::general_purpose::STANDARD.encode(expected_digest.as_ref());
+        assert_eq!(hash, &expected);
+    }
+
+    #[test]
+    fn manifest_empty_files() {
+        let manifest = compute_manifest(&[]);
+        assert!(manifest.files.is_empty());
+    }
+
+    #[test]
+    fn manifest_different_content_different_hashes() {
+        let files = vec![
+            ("a.txt".to_string(), b"hello".to_vec()),
+            ("b.txt".to_string(), b"world".to_vec()),
+        ];
+        let manifest = compute_manifest(&files);
+        let hash_a = manifest.files.get("a.txt").unwrap();
+        let hash_b = manifest.files.get("b.txt").unwrap();
+        assert_ne!(hash_a, hash_b);
+    }
+
+    #[test]
+    fn manifest_same_content_same_hash() {
+        let files = vec![
+            ("a.txt".to_string(), b"same".to_vec()),
+            ("b.txt".to_string(), b"same".to_vec()),
+        ];
+        let manifest = compute_manifest(&files);
+        let hash_a = manifest.files.get("a.txt").unwrap();
+        let hash_b = manifest.files.get("b.txt").unwrap();
+        assert_eq!(hash_a, hash_b);
+    }
+
+    // --- DeployClient sync integration tests (wiremock) ---
+
+    async fn setup_client() -> (MockServer, DeployClient) {
+        let server = MockServer::start().await;
+        let client = DeployClient::new(&server.uri(), "test-key").unwrap();
+        (server, client)
+    }
+
+    #[tokio::test]
+    async fn sync_manifest_sends_correct_request() {
+        let (server, client) = setup_client().await;
+
+        let response_body = serde_json::json!({
+            "to_upload": ["SOUL.md"],
+            "to_download": [],
+            "to_delete_remote": [],
+            "to_delete_local": []
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/agents/agent-123/sync"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut files = HashMap::new();
+        files.insert("SOUL.md".to_string(), "somehash".to_string());
+        let manifest = SyncManifestRequest { files };
+
+        let result = client.sync_manifest("agent-123", &manifest).await.unwrap();
+        assert_eq!(result.to_upload, vec!["SOUL.md"]);
+        assert!(result.to_download.is_empty());
+    }
+
+    #[tokio::test]
+    async fn download_file_returns_content() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v1/agents/agent-123/files/.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"file content here"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let data = client.download_file("agent-123", "SOUL.md").await.unwrap();
+        assert_eq!(data, b"file content here");
+    }
+
+    #[tokio::test]
+    async fn delete_file_succeeds() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("DELETE"))
+            .and(path_regex(r"/api/v1/agents/agent-123/files/.*"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        client.delete_file("agent-123", "old.md").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn push_agent_uploads_changed_and_deletes_stale() {
+        let (server, client) = setup_client().await;
+
+        // Mock: list agents → return existing agent
+        Mock::given(method("GET"))
+            .and(path("/api/v1/agents"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"id": "agent-id-1", "name": "test-agent", "gcs_path": "agents/1/", "created_at": "2026-01-01T00:00:00Z"}
+            ])))
+            .mount(&server)
+            .await;
+
+        // Mock: sync → one file to upload, one to delete
+        Mock::given(method("POST"))
+            .and(path("/api/v1/agents/agent-id-1/sync"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "to_upload": ["SOUL.md"],
+                "to_download": [],
+                "to_delete_remote": ["old-file.md"],
+                "to_delete_local": []
+            })))
+            .mount(&server)
+            .await;
+
+        // Mock: upload file
+        Mock::given(method("POST"))
+            .and(path("/api/v1/agents/agent-id-1/files"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "uploaded": [{"path": "SOUL.md", "size": 11}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        // Mock: delete file
+        Mock::given(method("DELETE"))
+            .and(path_regex(r"/api/v1/agents/agent-id-1/files/.*"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        // Create temp agent dir with one file
+        let tmp = tempfile::tempdir().unwrap();
+        let agent_dir = tmp.path().join("test-agent");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::write(agent_dir.join("SOUL.md"), "hello world").unwrap();
+
+        let summary = client.push_agent("test-agent", &agent_dir, None).await.unwrap();
+        assert_eq!(summary.uploaded, 1);
+        assert_eq!(summary.deleted_remote, 1);
+        assert_eq!(summary.downloaded, 0);
+    }
+
+    #[tokio::test]
+    async fn pull_agent_downloads_and_deletes_local() {
+        let (server, client) = setup_client().await;
+
+        // Mock: list agents
+        Mock::given(method("GET"))
+            .and(path("/api/v1/agents"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"id": "agent-id-1", "name": "test-agent", "gcs_path": "agents/1/", "created_at": "2026-01-01T00:00:00Z"}
+            ])))
+            .mount(&server)
+            .await;
+
+        // Mock: sync → one file to download, one to delete locally
+        Mock::given(method("POST"))
+            .and(path("/api/v1/agents/agent-id-1/sync"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "to_upload": [],
+                "to_download": [{"path": "BOOT.md", "size": 100, "md5_hash": "abc123"}],
+                "to_delete_remote": [],
+                "to_delete_local": ["stale.md"]
+            })))
+            .mount(&server)
+            .await;
+
+        // Mock: download BOOT.md
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v1/agents/agent-id-1/files/.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"boot content"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        // Create temp agent dir with stale file
+        let tmp = tempfile::tempdir().unwrap();
+        let agent_dir = tmp.path().join("test-agent");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::write(agent_dir.join("stale.md"), "old content").unwrap();
+
+        let summary = client.pull_agent("test-agent", &agent_dir).await.unwrap();
+        assert_eq!(summary.downloaded, 1);
+        assert_eq!(summary.deleted_local, 1);
+        assert_eq!(summary.uploaded, 0);
+
+        // Verify: BOOT.md was written
+        let boot_content = std::fs::read_to_string(agent_dir.join("BOOT.md")).unwrap();
+        assert_eq!(boot_content, "boot content");
+
+        // Verify: stale.md was deleted
+        assert!(!agent_dir.join("stale.md").exists());
+    }
+
+    // --- parse_env_file tests ---
+
+    #[test]
+    fn parse_env_basic_key_value() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env_path = tmp.path().join(".env");
+        std::fs::write(&env_path, "KEY1=value1\nKEY2=value2\n").unwrap();
+
+        let env = parse_env_file(&env_path).unwrap();
+        assert_eq!(env.get("KEY1").unwrap(), "value1");
+        assert_eq!(env.get("KEY2").unwrap(), "value2");
+        assert_eq!(env.len(), 2);
+    }
+
+    #[test]
+    fn parse_env_strips_quotes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env_path = tmp.path().join(".env");
+        std::fs::write(&env_path, "KEY=\"quoted value\"\n").unwrap();
+
+        let env = parse_env_file(&env_path).unwrap();
+        assert_eq!(env.get("KEY").unwrap(), "quoted value");
+    }
+
+    #[test]
+    fn parse_env_skips_comments_and_empty_lines() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env_path = tmp.path().join(".env");
+        std::fs::write(&env_path, "# comment\n\nKEY=val\n  \n# another\n").unwrap();
+
+        let env = parse_env_file(&env_path).unwrap();
+        assert_eq!(env.len(), 1);
+        assert_eq!(env.get("KEY").unwrap(), "val");
+    }
+
+    #[test]
+    fn parse_env_handles_whitespace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env_path = tmp.path().join(".env");
+        std::fs::write(&env_path, "  KEY = value  \n").unwrap();
+
+        let env = parse_env_file(&env_path).unwrap();
+        assert_eq!(env.get("KEY").unwrap(), "value");
+    }
+
+    #[test]
+    fn parse_env_missing_file_errors() {
+        let result = parse_env_file(Path::new("/nonexistent/.env"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_env_value_with_equals_sign() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env_path = tmp.path().join(".env");
+        std::fs::write(&env_path, "DATABASE_URL=postgres://user:pass@host/db?opt=1\n").unwrap();
+
+        let env = parse_env_file(&env_path).unwrap();
+        assert_eq!(
+            env.get("DATABASE_URL").unwrap(),
+            "postgres://user:pass@host/db?opt=1"
+        );
+    }
+
+    // --- collect_files_recursive tests ---
+
+    #[test]
+    fn collect_files_skips_hidden_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        std::fs::write(dir.join("visible.txt"), "ok").unwrap();
+        std::fs::create_dir(dir.join(".hidden")).unwrap();
+        std::fs::write(dir.join(".hidden").join("secret.txt"), "nope").unwrap();
+        std::fs::write(dir.join(".gitignore"), "nope").unwrap();
+
+        let mut files = Vec::new();
+        collect_files_recursive(dir, "", &mut files).unwrap();
+
+        let names: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(names.contains(&"visible.txt"));
+        assert!(!names.iter().any(|n| n.contains("hidden") || n.contains(".git")));
+    }
+
+    #[test]
+    fn collect_files_with_nested_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        std::fs::write(dir.join("root.md"), "root").unwrap();
+        std::fs::create_dir(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub").join("nested.md"), "nested").unwrap();
+
+        let mut files = Vec::new();
+        collect_files_recursive(dir, "", &mut files).unwrap();
+
+        let names: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(names.contains(&"root.md"));
+        assert!(names.contains(&"sub/nested.md"));
+    }
+
+    #[test]
+    fn collect_files_with_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("skill.md"), "data").unwrap();
+
+        let mut files = Vec::new();
+        collect_files_recursive(dir, "skills/", &mut files).unwrap();
+
+        assert_eq!(files[0].0, "skills/skill.md");
+    }
+
+    #[test]
+    fn collect_files_nonexistent_dir_is_ok() {
+        let mut files = Vec::new();
+        let result = collect_files_recursive(Path::new("/nonexistent"), "", &mut files);
+        assert!(result.is_ok());
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn collect_files_skips_node_modules_and_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        std::fs::write(dir.join("keep.md"), "ok").unwrap();
+        std::fs::create_dir(dir.join("node_modules")).unwrap();
+        std::fs::write(dir.join("node_modules").join("pkg.js"), "skip").unwrap();
+        std::fs::create_dir(dir.join("target")).unwrap();
+        std::fs::write(dir.join("target").join("bin"), "skip").unwrap();
+
+        let mut files = Vec::new();
+        collect_files_recursive(dir, "", &mut files).unwrap();
+
+        let names: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(names, vec!["keep.md"]);
+    }
+
+    // --- get_deploy_config tests ---
+
+    #[tokio::test]
+    async fn get_deploy_config_returns_readiness() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/agents/agent-123/deploy-config"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "version": 1,
+                "variables": {"MODEL": "claude-sonnet"},
+                "secrets": [
+                    {"key": "ANTHROPIC_API_KEY", "required": true, "description": "API key", "present": true, "scope": "agent", "hint": "sk-a"}
+                ],
+                "ready": true,
+                "missing_required": []
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let config = client.get_deploy_config("agent-123").await.unwrap();
+        assert!(config.is_some());
+        let config = config.unwrap();
+        assert!(config.ready);
+        assert_eq!(config.version, 1);
+        assert_eq!(config.variables.get("MODEL").unwrap(), "claude-sonnet");
+        assert_eq!(config.secrets.len(), 1);
+        assert!(config.secrets[0].present);
+        assert!(config.missing_required.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_deploy_config_returns_none_on_404() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/agents/agent-123/deploy-config"))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let config = client.get_deploy_config("agent-123").await.unwrap();
+        assert!(config.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_deploy_config_errors_on_500() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/agents/agent-123/deploy-config"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("internal error"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let result = client.get_deploy_config("agent-123").await;
+        assert!(result.is_err());
+    }
+
+    // --- Secrets CRUD tests ---
+
+    #[tokio::test]
+    async fn list_agent_secrets_returns_list() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/agents/agent-123/secrets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"id": "s1", "key": "API_KEY", "hint": "sk-a", "agent_id": "agent-123", "created_at": "2026-01-01T00:00:00Z"},
+                {"id": "s2", "key": "DB_URL", "hint": "post", "agent_id": "agent-123", "created_at": "2026-01-01T00:00:00Z"}
+            ])))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let secrets = client.list_agent_secrets("agent-123").await.unwrap();
+        assert_eq!(secrets.len(), 2);
+        assert_eq!(secrets[0].key, "API_KEY");
+        assert_eq!(secrets[1].key, "DB_URL");
+    }
+
+    #[tokio::test]
+    async fn list_user_secrets_returns_list() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/secrets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"id": "s1", "key": "GLOBAL_KEY", "hint": "glo", "agent_id": null, "created_at": "2026-01-01T00:00:00Z"}
+            ])))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let secrets = client.list_user_secrets().await.unwrap();
+        assert_eq!(secrets.len(), 1);
+        assert_eq!(secrets[0].key, "GLOBAL_KEY");
+        assert!(secrets[0].agent_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn set_user_secret_succeeds() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/secrets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "s-new", "key": "MY_SECRET", "hint": "val", "agent_id": null, "created_at": "2026-01-01T00:00:00Z"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let secret = client.set_user_secret("MY_SECRET", "my-value").await.unwrap();
+        assert_eq!(secret.key, "MY_SECRET");
+        assert_eq!(secret.id, "s-new");
+    }
+
+    #[tokio::test]
+    async fn delete_user_secret_succeeds() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("DELETE"))
+            .and(path("/api/v1/secrets/s-123"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        client.delete_user_secret("s-123").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_agent_secret_succeeds() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("DELETE"))
+            .and(path("/api/v1/agents/agent-123/secrets/s-456"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        client.delete_agent_secret("agent-123", "s-456").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn list_secrets_error_propagates() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/secrets"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let result = client.list_user_secrets().await;
+        assert!(result.is_err());
+    }
+
+    // --- Error case tests for sync operations ---
+
+    #[tokio::test]
+    async fn sync_manifest_error_on_server_failure() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/agents/agent-123/sync"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("server error"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let manifest = SyncManifestRequest { files: HashMap::new() };
+        let result = client.sync_manifest("agent-123", &manifest).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn download_file_error_on_404() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v1/agents/agent-123/files/.*"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let result = client.download_file("agent-123", "missing.md").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn delete_file_error_on_500() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("DELETE"))
+            .and(path_regex(r"/api/v1/agents/agent-123/files/.*"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("internal"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let result = client.delete_file("agent-123", "bad.md").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn pull_agent_errors_when_agent_not_found() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/agents"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let result = client.pull_agent("nonexistent", tmp.path()).await;
+        assert!(result.is_err());
+    }
+
+    // --- push_agent with skills dir ---
+
+    #[tokio::test]
+    async fn push_agent_includes_skills_dir() {
+        let (server, client) = setup_client().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/agents"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"id": "agent-id-1", "name": "test-agent", "gcs_path": "agents/1/", "created_at": "2026-01-01T00:00:00Z"}
+            ])))
+            .mount(&server)
+            .await;
+
+        // Sync returns both agent file and skill file need upload
+        Mock::given(method("POST"))
+            .and(path("/api/v1/agents/agent-id-1/sync"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "to_upload": ["SOUL.md", "skills/greet.md"],
+                "to_download": [],
+                "to_delete_remote": [],
+                "to_delete_local": []
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/agents/agent-id-1/files"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "uploaded": [{"path": "SOUL.md", "size": 5}, {"path": "skills/greet.md", "size": 6}]
+            })))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let agent_dir = tmp.path().join("agent");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::write(agent_dir.join("SOUL.md"), "soul").unwrap();
+
+        let skills_dir = tmp.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        std::fs::write(skills_dir.join("greet.md"), "greet!").unwrap();
+
+        let summary = client
+            .push_agent("test-agent", &agent_dir, Some(&skills_dir))
+            .await
+            .unwrap();
+        assert_eq!(summary.uploaded, 2);
+        assert_eq!(summary.unchanged, 0);
+    }
 }
