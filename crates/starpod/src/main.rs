@@ -2215,16 +2215,50 @@ async fn main() -> anyhow::Result<()> {
                             if instances.is_empty() {
                                 println!("  {} No instances found.", "ℹ".bright_cyan());
                             } else {
+                                println!();
                                 for inst in &instances {
-                                    let name = inst.name.as_deref().unwrap_or("(unnamed)");
-                                    let region = inst.region.as_deref().unwrap_or("-");
+                                    let id_short = &inst.id[..8.min(inst.id.len())];
+                                    let agent_short = &inst.agent_id[..8.min(inst.agent_id.len())];
+                                    let status_str = format!("{}", inst.status);
+                                    let status_colored = match status_str.as_str() {
+                                        "running" => status_str.bright_green(),
+                                        "pending" | "provisioning" => status_str.bright_yellow(),
+                                        "stopped" | "stopping" => status_str.dimmed(),
+                                        "error" => status_str.bright_red(),
+                                        _ => status_str.normal(),
+                                    };
                                     println!(
-                                        "  {} [{}] {} region={}",
-                                        &inst.id[..8.min(inst.id.len())],
-                                        inst.status,
-                                        name,
-                                        region
+                                        "  {}  {}",
+                                        id_short.bright_white().bold(),
+                                        status_colored,
                                     );
+                                    println!(
+                                        "  {}  Agent   {}",
+                                        "│".dimmed(),
+                                        agent_short,
+                                    );
+                                    if let Some(ref zone) = inst.zone {
+                                        println!(
+                                            "  {}  Zone    {}",
+                                            "│".dimmed(),
+                                            zone.dimmed(),
+                                        );
+                                    }
+                                    if let Some(ref ip) = inst.ip_address {
+                                        println!(
+                                            "  {}  IP      {}",
+                                            "│".dimmed(),
+                                            ip,
+                                        );
+                                    }
+                                    if let Some(ref err) = inst.error_message {
+                                        println!(
+                                            "  {}  Error   {}",
+                                            "│".dimmed(),
+                                            err.bright_red(),
+                                        );
+                                    }
+                                    println!();
                                 }
                             }
                         }
