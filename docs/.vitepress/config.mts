@@ -6,8 +6,9 @@ export default defineConfig({
   base: process.env.DOCS_BASE || '/docs/',
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: `${process.env.DOCS_BASE || '/docs/'}favicon.svg` }],
-    ['meta', { name: 'theme-color', content: '#6366f1' }],
+    ['meta', { name: 'theme-color', content: '#0A0A0A' }],
   ],
+  appearance: 'dark',
   cleanUrls: true,
   lastUpdated: true,
   ignoreDeadLinks: [
