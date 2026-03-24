@@ -25,10 +25,10 @@ fn build_web_ui(manifest_dir: &str, npm: &str) {
     let web_dir = Path::new(manifest_dir).join("../../web");
     let dist_dir = Path::new(manifest_dir).join("static/dist");
 
-    if Command::new(npm).arg("--version").output().is_err() {
+    if !web_dir.exists() || Command::new(npm).arg("--version").output().is_err() {
         eprintln!(
-            "warning: npm not found — web UI will not be included. \
-             Install Node.js and run `npm run build` in web/ manually."
+            "warning: web/ directory not found or npm not available — \
+             web UI will not be included."
         );
         // Create a minimal placeholder so rust-embed doesn't fail
         std::fs::create_dir_all(&dist_dir).ok();
@@ -85,10 +85,10 @@ fn build_docs(manifest_dir: &str, npm: &str) {
     let docs_dir = Path::new(manifest_dir).join("../../docs");
     let dist_dir = docs_dir.join(".vitepress/dist");
 
-    if Command::new(npm).arg("--version").output().is_err() {
+    if !docs_dir.exists() || Command::new(npm).arg("--version").output().is_err() {
         eprintln!(
-            "warning: npm not found — docs will not be included. \
-             Install Node.js and run `npm run build` in docs/ manually."
+            "warning: docs/ directory not found or npm not available — \
+             docs will not be included."
         );
         std::fs::create_dir_all(&dist_dir).ok();
         std::fs::write(
