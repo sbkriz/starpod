@@ -796,4 +796,107 @@ mod tests {
         // New skill added
         assert!(result.skills.contains_key("new-skill"));
     }
+
+    #[test]
+    fn test_load_nonexistent_returns_none() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let result = DeployManifest::load(&tmp.path().join("nope.toml")).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_load_corrupt_file_returns_error() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("deploy.toml");
+        std::fs::write(&path, "not valid toml {{{").unwrap();
+        assert!(DeployManifest::load(&path).is_err());
+    }
+
+    #[test]
+    fn test_merge_with_empty_existing() {
+        let existing = DeployManifest {
+            version: 1,
+            agent: EnvSection::default(),
+            skills: BTreeMap::new(),
+        };
+
+        let generated = DeployManifest::generate(&minimal_config(), vec![
+            SkillEnvInput {
+                name: "new-skill".to_string(),
+                secrets: vec![("KEY".to_string(), true, "K".to_string())],
+                variables: vec![],
+            },
+        ]);
+
+        let merged = generated.merge_with_existing(&existing);
+        // Everything from generated comes through
+        assert!(merged.agent.secrets.contains_key("ANTHROPIC_API_KEY"));
+        assert!(merged.skills.contains_key("new-skill"));
+    }
+
+    #[test]
+    fn test_merge_preserves_alias_while_updating_required() {
+        // User changed alias AND skill author changed required: both should apply
+        let mut existing = DeployManifest::generate(&minimal_config(), vec![
+            SkillEnvInput {
+                name: "my-skill".to_string(),
+                secrets: vec![("TOKEN".to_string(), false, "Old".to_string())],
+                variables: vec![],
+            },
+        ]);
+        existing.skills.get_mut("my-skill").unwrap()
+            .secrets.get_mut("TOKEN").unwrap()
+            .secret = "TOKEN_STAGING".to_string();
+
+        // Skill author changed required: false → true and updated description
+        let generated = DeployManifest::generate(&minimal_config(), vec![
+            SkillEnvInput {
+                name: "my-skill".to_string(),
+                secrets: vec![("TOKEN".to_string(), true, "Now required".to_string())],
+                variables: vec![],
+            },
+        ]);
+
+        let merged = generated.merge_with_existing(&existing);
+        let entry = &merged.skills["my-skill"].secrets["TOKEN"];
+        assert_eq!(entry.secret, "TOKEN_STAGING"); // alias preserved
+        assert!(entry.required); // required updated from source
+        assert_eq!(entry.description, "Now required"); // description updated
+    }
+
+    #[test]
+    fn test_generate_and_write_first_run_no_existing() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("deploy.toml");
+
+        // File doesn't exist yet
+        assert!(!path.exists());
+
+        let result = DeployManifest::generate_and_write(&minimal_config(), vec![
+            SkillEnvInput {
+                name: "my-skill".to_string(),
+                secrets: vec![("KEY".to_string(), true, "K".to_string())],
+                variables: vec![],
+            },
+        ], &path).unwrap();
+
+        assert!(path.exists());
+        assert!(result.skills.contains_key("my-skill"));
+        assert_eq!(result.skills["my-skill"].secrets["KEY"].secret, "KEY");
+    }
+
+    #[test]
+    fn test_merge_preserves_user_added_agent_variable_default() {
+        let mut existing = DeployManifest::generate(&minimal_config(), vec![]);
+        existing.agent.variables.insert("DEBUG".to_string(), VariableEntry {
+            default: Some("true".to_string()),
+            description: "Debug mode".to_string(),
+        });
+
+        let generated = DeployManifest::generate(&minimal_config(), vec![]);
+        let merged = generated.merge_with_existing(&existing);
+
+        assert!(merged.agent.variables.contains_key("DEBUG"));
+        assert_eq!(merged.agent.variables["DEBUG"].default.as_deref(), Some("true"));
+    }
 }
