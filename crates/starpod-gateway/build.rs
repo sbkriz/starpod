@@ -25,17 +25,20 @@ fn build_web_ui(manifest_dir: &str, npm: &str) {
     let web_dir = Path::new(manifest_dir).join("../../web");
     let dist_dir = Path::new(manifest_dir).join("static/dist");
 
-    if !web_dir.exists() || Command::new(npm).arg("--version").output().is_err() {
+    if !web_dir.join("package.json").exists() || Command::new(npm).arg("--version").output().is_err() {
         eprintln!(
             "warning: web/ directory not found or npm not available — \
              web UI will not be included."
         );
-        // Create a minimal placeholder so rust-embed doesn't fail
-        std::fs::create_dir_all(&dist_dir).ok();
-        std::fs::write(
-            dist_dir.join("index.html"),
-            "<html><body><h1>Web UI not built</h1><p>Run <code>npm run build</code> in the <code>web/</code> directory.</p></body></html>",
-        ).ok();
+        // Create a minimal placeholder so rust-embed doesn't fail,
+        // but only if dist doesn't already have content (e.g. from package)
+        if !dist_dir.join("index.html").exists() {
+            std::fs::create_dir_all(&dist_dir).ok();
+            std::fs::write(
+                dist_dir.join("index.html"),
+                "<html><body><h1>Web UI not built</h1><p>Run <code>npm run build</code> in the <code>web/</code> directory.</p></body></html>",
+            ).ok();
+        }
         return;
     }
 
@@ -85,16 +88,18 @@ fn build_docs(manifest_dir: &str, npm: &str) {
     let docs_dir = Path::new(manifest_dir).join("../../docs");
     let dist_dir = docs_dir.join(".vitepress/dist");
 
-    if !docs_dir.exists() || Command::new(npm).arg("--version").output().is_err() {
+    if !docs_dir.join("package.json").exists() || Command::new(npm).arg("--version").output().is_err() {
         eprintln!(
             "warning: docs/ directory not found or npm not available — \
              docs will not be included."
         );
-        std::fs::create_dir_all(&dist_dir).ok();
-        std::fs::write(
-            dist_dir.join("index.html"),
-            "<html><body><h1>Docs not built</h1><p>Run <code>npm run build</code> in the <code>docs/</code> directory.</p></body></html>",
-        ).ok();
+        if !dist_dir.join("index.html").exists() {
+            std::fs::create_dir_all(&dist_dir).ok();
+            std::fs::write(
+                dist_dir.join("index.html"),
+                "<html><body><h1>Docs not built</h1><p>Run <code>npm run build</code> in the <code>docs/</code> directory.</p></body></html>",
+            ).ok();
+        }
         return;
     }
 

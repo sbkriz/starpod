@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Axum HTTP/WS gateway server for Starpod"
+include = ["src/**/*", "build.rs", "static/**/*", "Cargo.toml", "LICENSE"]
 
 [dependencies]
 starpod-core = { workspace = true }
