@@ -3,9 +3,9 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'Starpod',
   description: 'A local-first personal AI assistant platform built in Rust',
-  base: '/docs/',
+  base: process.env.DOCS_BASE || '/docs/',
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/docs/favicon.svg' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: `${process.env.DOCS_BASE || '/docs/'}favicon.svg` }],
     ['meta', { name: 'theme-color', content: '#6366f1' }],
   ],
   cleanUrls: true,
