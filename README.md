@@ -108,10 +108,9 @@ model = "claude-haiku-4-5"
 # allowed_users = [123456789, "alice"]
 ```
 
-**Secrets** go in `.env` files (never in config):
-- `agents/<name>/.env` — production secrets
-- `agents/<name>/.env.dev` — dev overrides (used by `starpod dev`)
-- `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, etc.
+**Secrets** go in `.env` at the workspace root (never in config):
+- `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `BRAVE_API_KEY`, etc.
+- Populated into an encrypted vault at serve time
 
 **Personality** is defined in `agents/<name>/SOUL.md`, not in config.
 
@@ -169,7 +168,7 @@ API key authentication: set `STARPOD_API_KEY` env var on the server, then `local
 
 2. **Add the token to your `.env`**
 
-   Add to `agents/<name>/.env.dev` (for dev) or `agents/<name>/.env` (for prod):
+   Add to your workspace `.env`:
    ```
    TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
    ```

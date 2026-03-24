@@ -65,7 +65,7 @@ your-project/
 └── .instances/
     └── my-agent/           Agent's filesystem sandbox
         ├── .starpod/       Internal state (like .git/)
-        │   ├── .env        Secrets (from .env.dev or .env)
+        │   ├── db/vault.db  Encrypted secrets (from workspace .env)
         │   ├── config/     Blueprint-managed (overwritten on build)
         │   │   ├── agent.toml
         │   │   ├── SOUL.md
