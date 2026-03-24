@@ -119,7 +119,10 @@ function Sidebar({ onSelectSession, onNewChat }) {
         <div className="flex items-center gap-2">
           {unread && <span className="unread-dot" />}
           <div className="flex-1 min-w-0">
-            <div className={`text-[13px] leading-snug truncate${active ? ' text-primary font-medium' : ' text-secondary'}`}>
+            <div
+              className={`text-[13px] leading-snug truncate${active ? ' text-primary font-medium' : ' text-secondary'}`}
+              title={summary}
+            >
               {summary}
             </div>
           </div>
