@@ -111,6 +111,8 @@ pub struct AgentConfigInput {
     pub models: Vec<String>,
     /// Whether telegram channel is enabled.
     pub telegram_enabled: bool,
+    /// Whether internet/web search is enabled (needs BRAVE_API_KEY).
+    pub internet_enabled: bool,
 }
 
 // ── Generator ───────────────────────────────────────────────────────────────
@@ -142,6 +144,15 @@ impl DeployManifest {
                 secret: "TELEGRAM_BOT_TOKEN".to_string(),
                 required: true,
                 description: "Telegram bot token".to_string(),
+            });
+        }
+
+        // Brave Search API key if internet/web search is enabled
+        if config.internet_enabled {
+            agent.secrets.insert("BRAVE_API_KEY".to_string(), SecretEntry {
+                secret: "BRAVE_API_KEY".to_string(),
+                required: false,
+                description: "Brave Search API key for web search".to_string(),
             });
         }
 
@@ -297,6 +308,7 @@ mod tests {
         let config = AgentConfigInput {
             models: vec!["anthropic/claude-sonnet-4-6".to_string()],
             telegram_enabled: false,
+            internet_enabled: false,
         };
         let manifest = DeployManifest::generate(&config, vec![]);
         assert_eq!(manifest.version, 1);
@@ -309,6 +321,7 @@ mod tests {
         let config = AgentConfigInput {
             models: vec!["anthropic/claude-sonnet-4-6".to_string()],
             telegram_enabled: true,
+            internet_enabled: false,
         };
         let manifest = DeployManifest::generate(&config, vec![]);
         assert!(manifest.agent.secrets.contains_key("TELEGRAM_BOT_TOKEN"));
@@ -319,6 +332,7 @@ mod tests {
         let config = AgentConfigInput {
             models: vec!["anthropic/claude-sonnet-4-6".to_string()],
             telegram_enabled: false,
+            internet_enabled: false,
         };
         let skill_envs = vec![
             SkillEnvInput {
@@ -349,6 +363,7 @@ mod tests {
                 "anthropic/claude-haiku-4-5".to_string(), // duplicate provider
             ],
             telegram_enabled: false,
+            internet_enabled: false,
         };
         let manifest = DeployManifest::generate(&config, vec![]);
         assert!(manifest.agent.secrets.contains_key("ANTHROPIC_API_KEY"));
@@ -361,6 +376,7 @@ mod tests {
         let config = AgentConfigInput {
             models: vec!["anthropic/claude-sonnet-4-6".to_string()],
             telegram_enabled: false,
+            internet_enabled: false,
         };
         let skill_envs = vec![
             SkillEnvInput {
@@ -394,6 +410,7 @@ mod tests {
         let config = AgentConfigInput {
             models: vec!["anthropic/claude-sonnet-4-6".to_string()],
             telegram_enabled: false,
+            internet_enabled: false,
         };
         let manifest = DeployManifest::generate(&config, vec![]);
         manifest.write_to(&path).unwrap();
@@ -407,6 +424,7 @@ mod tests {
         let config = AgentConfigInput {
             models: vec![],
             telegram_enabled: false,
+            internet_enabled: false,
         };
         let manifest = DeployManifest::generate(&config, vec![]);
         assert!(manifest.agent.secrets.is_empty());
@@ -417,6 +435,7 @@ mod tests {
         let config = AgentConfigInput {
             models: vec!["just-a-model".to_string()],
             telegram_enabled: false,
+            internet_enabled: false,
         };
         let manifest = DeployManifest::generate(&config, vec![]);
         // Should use the whole string as provider name
@@ -428,6 +447,7 @@ mod tests {
         let config = AgentConfigInput {
             models: vec!["anthropic/claude-sonnet-4-6".to_string()],
             telegram_enabled: false,
+            internet_enabled: false,
         };
         let skill_envs = vec![
             SkillEnvInput {
@@ -458,6 +478,7 @@ mod tests {
         let config = AgentConfigInput {
             models: vec!["anthropic/claude-sonnet-4-6".to_string()],
             telegram_enabled: false,
+            internet_enabled: false,
         };
         let skill_envs = vec![
             SkillEnvInput {
@@ -476,6 +497,7 @@ mod tests {
         let config = AgentConfigInput {
             models: vec![],
             telegram_enabled: false,
+            internet_enabled: false,
         };
         let skill_envs = vec![
             SkillEnvInput {
@@ -497,6 +519,7 @@ mod tests {
         let config = AgentConfigInput {
             models: vec![],
             telegram_enabled: false,
+            internet_enabled: false,
         };
         let skill_envs = vec![
             SkillEnvInput {
@@ -514,6 +537,7 @@ mod tests {
         let config = AgentConfigInput {
             models: vec!["anthropic/claude-sonnet-4-6".to_string()],
             telegram_enabled: true,
+            internet_enabled: false,
         };
         let skill_envs = vec![
             SkillEnvInput {
@@ -547,6 +571,7 @@ mod tests {
         AgentConfigInput {
             models: vec!["anthropic/claude-sonnet-4-6".to_string()],
             telegram_enabled: false,
+            internet_enabled: false,
         }
     }
 

@@ -83,7 +83,7 @@ pub fn apply_blueprint(
     blueprint_dir: &Path,
     instance_dir: &Path,
     workspace_dir: &Path,
-    env_source: EnvSource,
+    _env_source: EnvSource,
 ) -> crate::Result<()> {
     let starpod_dir = instance_dir.join(".starpod");
     let config_dir = starpod_dir.join("config");
@@ -136,30 +136,9 @@ pub fn apply_blueprint(
         debug!("Copied SOUL.md from blueprint");
     }
 
-    // 3. Copy .env file from workspace root to starpod root (not config/)
-    let env_src = match env_source {
-        EnvSource::Dev => {
-            let dev = workspace_dir.join(".env.dev");
-            if dev.is_file() {
-                Some(dev)
-            } else {
-                // Fall back to .env if .env.dev doesn't exist
-                let prod = workspace_dir.join(".env");
-                if prod.is_file() { Some(prod) } else { None }
-            }
-        }
-        EnvSource::Prod => {
-            let prod = workspace_dir.join(".env");
-            if prod.is_file() { Some(prod) } else { None }
-        }
-    };
-    if let Some(src) = env_src {
-        std::fs::copy(&src, starpod_dir.join(".env"))
-            .map_err(|e| StarpodError::Config(format!(
-                "Failed to copy .env: {}", e
-            )))?;
-        debug!(source = %src.display(), "Copied .env from workspace");
-    }
+    // 3. .env is NOT copied into the instance — secrets are populated into
+    //    vault.db at build time from the workspace .env. The vault is the
+    //    sealed source of truth at serve time.
 
     // 4. Sync files/ → home/ directory
     let files_dir = blueprint_dir.join("files");
@@ -203,7 +182,7 @@ pub fn build_standalone(
     blueprint_dir: &Path,
     output_dir: &Path,
     skills_dir: Option<&Path>,
-    env_file: Option<&Path>,
+    _env_file: Option<&Path>,
     force: bool,
 ) -> crate::Result<()> {
     let starpod_dir = output_dir.join(".starpod");
@@ -270,20 +249,8 @@ pub fn build_standalone(
         debug!("Copied SOUL.md from blueprint");
     }
 
-    // 3. Copy .env file to starpod root (not config/) — only if not already present
-    if let Some(env_src) = env_file {
-        if env_src.is_file() {
-            std::fs::copy(env_src, starpod_dir.join(".env"))
-                .map_err(|e| StarpodError::Config(format!(
-                    "Failed to copy .env from {}: {}", env_src.display(), e
-                )))?;
-            debug!(source = %env_src.display(), "Copied .env");
-        } else {
-            return Err(StarpodError::Config(format!(
-                "Env file not found: {}", env_src.display()
-            )));
-        }
-    }
+    // 3. .env is NOT copied into the instance — secrets are populated into
+    //    vault.db at build time. The vault is the sealed source of truth.
 
     // 4. Sync files/ → home/ directory
     let files_dir = blueprint_dir.join("files");
@@ -468,7 +435,7 @@ mod tests {
         let cfg = sp.join("config");
         assert!(cfg.join("agent.toml").is_file());
         assert!(cfg.join("SOUL.md").is_file());
-        assert!(sp.join(".env").is_file());
+        assert!(!sp.join(".env").exists(), ".env should not be copied — vault handles secrets");
         assert!(sp.join("db").is_dir());
         assert!(cfg.join("HEARTBEAT.md").exists());
         assert!(cfg.join("BOOT.md").exists());
@@ -476,28 +443,26 @@ mod tests {
     }
 
     #[test]
-    fn apply_blueprint_dev_env() {
+    fn apply_blueprint_dev_env_not_copied() {
         let tmp = TempDir::new().unwrap();
         let blueprint = setup_blueprint(&tmp);
         let instance = tmp.path().join(".instances").join("test-bot");
 
         apply_blueprint(&blueprint, &instance, tmp.path(), EnvSource::Dev).unwrap();
 
-        // .env stays at starpod root, not in config/
-        let env_content = std::fs::read_to_string(instance.join(".starpod").join(".env")).unwrap();
-        assert!(env_content.contains("DEV_KEY=dev_secret"));
+        // .env is NOT copied — vault handles secrets at build time
+        assert!(!instance.join(".starpod").join(".env").exists());
     }
 
     #[test]
-    fn apply_blueprint_prod_env() {
+    fn apply_blueprint_prod_env_not_copied() {
         let tmp = TempDir::new().unwrap();
         let blueprint = setup_blueprint(&tmp);
         let instance = tmp.path().join(".instances").join("test-bot");
 
         apply_blueprint(&blueprint, &instance, tmp.path(), EnvSource::Prod).unwrap();
 
-        let env_content = std::fs::read_to_string(instance.join(".starpod").join(".env")).unwrap();
-        assert!(env_content.contains("PROD_KEY=secret"));
+        assert!(!instance.join(".starpod").join(".env").exists());
     }
 
     #[test]
@@ -579,19 +544,18 @@ mod tests {
     }
 
     #[test]
-    fn apply_blueprint_dev_falls_back_to_prod_env() {
+    fn apply_blueprint_dev_no_env_copied() {
         let tmp = TempDir::new().unwrap();
         let blueprint = tmp.path().join("agents").join("no-dev-env");
         std::fs::create_dir_all(&blueprint).unwrap();
         std::fs::write(blueprint.join("agent.toml"), "").unwrap();
-        // .env at workspace root, no .env.dev
         std::fs::write(tmp.path().join(".env"), "ONLY_PROD=yes\n").unwrap();
 
         let instance = tmp.path().join(".instances").join("no-dev-env");
         apply_blueprint(&blueprint, &instance, tmp.path(), EnvSource::Dev).unwrap();
 
-        let env = std::fs::read_to_string(instance.join(".starpod").join(".env")).unwrap();
-        assert!(env.contains("ONLY_PROD=yes"), "Dev should fall back to prod .env");
+        // .env not copied — vault reads from workspace .env directly at build time
+        assert!(!instance.join(".starpod").join(".env").exists());
     }
 
     #[test]
@@ -801,13 +765,13 @@ mod tests {
 
         build_standalone(&blueprint, &output, None, Some(&env_file), false).unwrap();
 
-        // .env should be at starpod root, not in config/
-        let content = std::fs::read_to_string(output.join(".starpod").join(".env")).unwrap();
-        assert!(content.contains("SECRET=hunter2"));
+        // .env is NOT copied — vault handles secrets at build time
+        assert!(!output.join(".starpod").join(".env").exists());
     }
 
     #[test]
-    fn build_standalone_fails_with_missing_env_file() {
+    fn build_standalone_with_missing_env_file_succeeds() {
+        // env_file param is ignored now — no copy, no error
         let tmp = TempDir::new().unwrap();
         let blueprint = tmp.path().join("my-agent");
         std::fs::create_dir_all(&blueprint).unwrap();
@@ -816,14 +780,13 @@ mod tests {
         let output = tmp.path().join("deploy");
         std::fs::create_dir_all(&output).unwrap();
 
-        let err = build_standalone(
+        build_standalone(
             &blueprint,
             &output,
             None,
             Some(Path::new("/nonexistent/.env")),
             false,
-        ).unwrap_err();
-        assert!(err.to_string().contains("Env file not found"));
+        ).unwrap(); // should not error
     }
 
     #[test]
@@ -955,8 +918,8 @@ mod tests {
         assert!(cfg.join("HEARTBEAT.md").exists());
         assert!(cfg.join("BOOTSTRAP.md").exists());
 
-        // .env → starpod root (NOT config/)
-        assert!(sp.join(".env").is_file());
+        // .env not copied (vault handles secrets)
+        assert!(!sp.join(".env").exists());
         assert!(!cfg.join(".env").exists());
 
         // Skills → starpod root (NOT config/)
@@ -1061,9 +1024,8 @@ mod tests {
         apply_blueprint(&blueprint, &instance, tmp.path(), EnvSource::Dev).unwrap();
 
         let sp = instance.join(".starpod");
-        // .env at starpod root
-        assert!(sp.join(".env").is_file());
-        // NOT in config/
+        // .env should NOT be in the instance (vault handles secrets)
+        assert!(!sp.join(".env").exists());
         assert!(!sp.join("config").join(".env").exists());
     }
 

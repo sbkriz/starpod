@@ -652,7 +652,7 @@ fn generate_deploy_manifest(
 ) -> anyhow::Result<()> {
     // Parse agent.toml for model/channel info
     let agent_toml_path = agent_dir.join("agent.toml");
-    let (models, telegram_enabled) = if agent_toml_path.exists() {
+    let (models, telegram_enabled, internet_enabled) = if agent_toml_path.exists() {
         let content = std::fs::read_to_string(&agent_toml_path)?;
         let table: toml::Value = toml::from_str(&content)?;
 
@@ -673,9 +673,14 @@ fn generate_deploy_manifest(
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        (models, telegram_enabled)
+        let internet_enabled = table.get("internet")
+            .and_then(|i| i.get("enabled"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true); // enabled by default
+
+        (models, telegram_enabled, internet_enabled)
     } else {
-        (vec!["anthropic/claude-sonnet-4-6".to_string()], false)
+        (vec!["anthropic/claude-sonnet-4-6".to_string()], false, true)
     };
 
     // Collect skill env declarations
@@ -697,7 +702,7 @@ fn generate_deploy_manifest(
         vec![]
     };
 
-    let config = AgentConfigInput { models, telegram_enabled };
+    let config = AgentConfigInput { models, telegram_enabled, internet_enabled };
     let deploy_path = agent_dir.join("deploy.toml");
     DeployManifest::generate_and_write(&config, skill_envs, &deploy_path)?;
     Ok(())
@@ -1736,13 +1741,21 @@ async fn main() -> anyhow::Result<()> {
                 let skills_path = if skills_dir.exists() { Some(skills_dir.as_path()) } else { None };
                 generate_deploy_manifest(&blueprint_dir, skills_path)?;
 
-                // Populate vault from .env + deploy.toml
+                // Populate vault from workspace .env + deploy.toml
                 let starpod_dir = instance_dir.join(".starpod");
                 let db_dir = starpod_dir.join("db");
                 let master_key = starpod_vault::derive_master_key(&db_dir)?;
                 let vault = starpod_vault::Vault::new(&db_dir.join("vault.db"), &master_key).await?;
-                let env_file = starpod_dir.join(".env");
-                let env_path = if env_file.exists() { Some(env_file.as_path()) } else { None };
+                // Read .env from workspace root (prefer .env.dev in dev mode)
+                let env_dev = workspace_root.join(".env.dev");
+                let env_prod = workspace_root.join(".env");
+                let env_path = if env_dev.exists() {
+                    Some(env_dev.as_path())
+                } else if env_prod.exists() {
+                    Some(env_prod.as_path())
+                } else {
+                    None
+                };
                 let deploy_toml = blueprint_dir.join("deploy.toml");
 
                 match starpod_vault::env::populate_vault(&deploy_toml, env_path, &vault).await {
@@ -3248,8 +3261,8 @@ async fn main() -> anyhow::Result<()> {
             let db_dir = starpod_dir.join("db");
             let master_key = starpod_vault::derive_master_key(&db_dir)?;
             let vault = starpod_vault::Vault::new(&db_dir.join("vault.db"), &master_key).await?;
-            let env_file_path = starpod_dir.join(".env");
-            let env_ref = if env_file_path.exists() { Some(env_file_path.as_path()) } else { None };
+            // Use the explicitly provided --env path (it's no longer copied into .starpod/)
+            let env_ref = env_path.as_deref();
             let deploy_toml = agent_path.join("deploy.toml");
 
             match starpod_vault::env::populate_vault(&deploy_toml, env_ref, &vault).await {

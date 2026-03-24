@@ -882,7 +882,8 @@ mod tests {
         assert_eq!(paths.project_root, instance_dir.join("home"));
         assert_eq!(paths.agent_home, instance_dir.join(".starpod"));
         assert_eq!(paths.db_dir, instance_dir.join(".starpod/db"));
-        assert!(paths.env_file.is_some());
+        // env_file is None — .env is not copied into instance (vault handles secrets)
+        assert!(paths.env_file.is_none());
     }
 
     #[test]
