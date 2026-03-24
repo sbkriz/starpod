@@ -698,8 +698,8 @@ fn generate_deploy_manifest(
     };
 
     let config = AgentConfigInput { models, telegram_enabled };
-    let manifest = DeployManifest::generate(&config, skill_envs);
-    manifest.write_to(&agent_dir.join("deploy.toml"))?;
+    let deploy_path = agent_dir.join("deploy.toml");
+    DeployManifest::generate_and_write(&config, skill_envs, &deploy_path)?;
     Ok(())
 }
 
