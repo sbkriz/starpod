@@ -1,3 +1,4 @@
+pub mod env;
 mod schema;
 
 use std::path::Path;
@@ -6,6 +7,7 @@ use std::str::FromStr;
 use aes_gcm::aead::{Aead, KeyInit, OsRng};
 use aes_gcm::{Aes256Gcm, AeadCore, Nonce};
 use chrono::Utc;
+use rand::RngCore;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use tracing::debug;
@@ -157,6 +159,44 @@ impl Vault {
             .await
             .map_err(|e| StarpodError::Database(format!("Audit log failed: {}", e)))?;
         Ok(())
+    }
+}
+
+/// Derive or load the 32-byte master key for a vault instance.
+///
+/// On first call, generates a random key and stores it at `db_dir/.vault_key`.
+/// On subsequent calls, reads from that file. The key file is per-instance
+/// and should never be committed to version control.
+pub fn derive_master_key(db_dir: &Path) -> Result<[u8; 32]> {
+    let key_path = db_dir.join(".vault_key");
+
+    if key_path.exists() {
+        let data = std::fs::read(&key_path)
+            .map_err(|e| StarpodError::Vault(format!("Failed to read vault key: {}", e)))?;
+        if data.len() != 32 {
+            return Err(StarpodError::Vault(format!(
+                "Vault key file has invalid length ({} bytes, expected 32)",
+                data.len()
+            )));
+        }
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&data);
+        Ok(key)
+    } else {
+        std::fs::create_dir_all(db_dir)
+            .map_err(|e| StarpodError::Vault(format!("Failed to create db dir: {}", e)))?;
+        let mut key = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut key);
+        std::fs::write(&key_path, &key)
+            .map_err(|e| StarpodError::Vault(format!("Failed to write vault key: {}", e)))?;
+        // Best-effort: restrict permissions on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+        }
+        debug!("Generated new vault master key at {}", key_path.display());
+        Ok(key)
     }
 }
 

@@ -1730,6 +1730,40 @@ async fn main() -> anyhow::Result<()> {
                     &workspace_root,
                     starpod_core::EnvSource::Dev,
                 )?;
+
+                // Generate deploy.toml from skills + agent.toml
+                let skills_dir = workspace_root.join("skills");
+                let skills_path = if skills_dir.exists() { Some(skills_dir.as_path()) } else { None };
+                generate_deploy_manifest(&blueprint_dir, skills_path)?;
+
+                // Populate vault from .env + deploy.toml
+                let starpod_dir = instance_dir.join(".starpod");
+                let db_dir = starpod_dir.join("db");
+                let master_key = starpod_vault::derive_master_key(&db_dir)?;
+                let vault = starpod_vault::Vault::new(&db_dir.join("vault.db"), &master_key).await?;
+                let env_file = starpod_dir.join(".env");
+                let env_path = if env_file.exists() { Some(env_file.as_path()) } else { None };
+                let deploy_toml = blueprint_dir.join("deploy.toml");
+
+                match starpod_vault::env::populate_vault(&deploy_toml, env_path, &vault).await {
+                    Ok(result) => {
+                        if result.secrets_count > 0 || result.variables_count > 0 {
+                            println!(
+                                "  {} Vault: {} secret(s), {} variable(s)",
+                                "✓".green().bold(),
+                                result.secrets_count,
+                                result.variables_count,
+                            );
+                        }
+                        for w in &result.warnings {
+                            println!("  {} {}", "⚠".yellow(), w);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("  {} {}", "✗".red().bold(), e);
+                        std::process::exit(1);
+                    }
+                }
             } else {
                 println!(
                     "  {} Using existing instance. Pass {} to rebuild from blueprint.",
@@ -1744,6 +1778,14 @@ async fn main() -> anyhow::Result<()> {
                 agent_name: agent_name.clone(),
             };
             let paths = starpod_core::ResolvedPaths::resolve(&instance_mode)?;
+
+            // Inject env from vault before loading config
+            let deploy_toml = blueprint_dir.join("deploy.toml");
+            if deploy_toml.exists() {
+                let master_key = starpod_vault::derive_master_key(&paths.db_dir)?;
+                let vault = starpod_vault::Vault::new(&paths.db_dir.join("vault.db"), &master_key).await?;
+                starpod_vault::env::inject_env_from_vault(&deploy_toml, &vault).await?;
+            }
 
             let mut agent_config = starpod_core::load_agent_config(&paths)?;
 
@@ -1780,6 +1822,18 @@ async fn main() -> anyhow::Result<()> {
 
         // ── Serve ─────────────────────────────────────────────────────
         Commands::Serve { agent: agent_name } => {
+            // Inject env from vault before resolving agent (config may need env vars)
+            {
+                let mode = detect_mode(agent_name.as_deref())?;
+                let paths = starpod_core::ResolvedPaths::resolve(&mode)?;
+                let deploy_toml = paths.config_dir.join("deploy.toml");
+                if deploy_toml.exists() && paths.db_dir.join("vault.db").exists() {
+                    let master_key = starpod_vault::derive_master_key(&paths.db_dir)?;
+                    let vault = starpod_vault::Vault::new(&paths.db_dir.join("vault.db"), &master_key).await?;
+                    starpod_vault::env::inject_env_from_vault(&deploy_toml, &vault).await?;
+                }
+            }
+
             let (agent, config, paths) = resolve_agent(agent_name).await?;
             let addr = config.server_addr.clone();
             let display_name = config.agent_name.clone();
@@ -3186,6 +3240,38 @@ async fn main() -> anyhow::Result<()> {
             )?;
 
             let starpod_dir = output_dir.join(".starpod");
+
+            // Generate deploy.toml from skills + agent.toml
+            generate_deploy_manifest(&agent_path, skills_path.as_deref())?;
+
+            // Populate vault from .env + deploy.toml
+            let db_dir = starpod_dir.join("db");
+            let master_key = starpod_vault::derive_master_key(&db_dir)?;
+            let vault = starpod_vault::Vault::new(&db_dir.join("vault.db"), &master_key).await?;
+            let env_file_path = starpod_dir.join(".env");
+            let env_ref = if env_file_path.exists() { Some(env_file_path.as_path()) } else { None };
+            let deploy_toml = agent_path.join("deploy.toml");
+
+            match starpod_vault::env::populate_vault(&deploy_toml, env_ref, &vault).await {
+                Ok(result) => {
+                    if result.secrets_count > 0 || result.variables_count > 0 {
+                        println!(
+                            "  {} Vault: {} secret(s), {} variable(s)",
+                            "✓".green().bold(),
+                            result.secrets_count,
+                            result.variables_count,
+                        );
+                    }
+                    for w in &result.warnings {
+                        println!("  {} {}", "⚠".yellow(), w);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("  {} {}", "✗".red().bold(), e);
+                    std::process::exit(1);
+                }
+            }
+
             println!();
             println!(
                 "  {} Built standalone agent at {}",

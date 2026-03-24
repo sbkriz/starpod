@@ -24,6 +24,7 @@ starpod-telegram = { workspace = true }
 starpod-skills = { workspace = true }
 starpod-cron = { workspace = true }
 starpod-instances = { workspace = true }
+starpod-vault = { workspace = true }
 starpod-auth = { workspace = true }
 futures = "0.3"
 chrono = "0.4"
