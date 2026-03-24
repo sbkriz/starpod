@@ -53,7 +53,7 @@ function appReducer(state, action) {
 
     case 'SHOW_SETTINGS':
       window.history.pushState(null, '', '#/settings/' + state.settingsActiveTab)
-      return { ...state, settingsVisible: true, cronVisible: false, filesVisible: false }
+      return { ...state, settingsVisible: true, cronVisible: false, filesVisible: false, previewUrl: null }
 
     case 'HIDE_SETTINGS': {
       const chatHash = state.currentSessionId ? '#/chat/' + state.currentSessionId : '#/'
@@ -63,7 +63,7 @@ function appReducer(state, action) {
 
     case 'SHOW_CRON':
       window.history.pushState(null, '', '#/cron')
-      return { ...state, cronVisible: true, settingsVisible: false, filesVisible: false }
+      return { ...state, cronVisible: true, settingsVisible: false, filesVisible: false, previewUrl: null }
 
     case 'HIDE_CRON': {
       const chatHash2 = state.currentSessionId ? '#/chat/' + state.currentSessionId : '#/'
@@ -73,7 +73,7 @@ function appReducer(state, action) {
 
     case 'SHOW_FILES':
       window.history.pushState(null, '', '#/files')
-      return { ...state, filesVisible: true, settingsVisible: false, cronVisible: false }
+      return { ...state, filesVisible: true, settingsVisible: false, cronVisible: false, previewUrl: null }
 
     case 'HIDE_FILES': {
       const chatHash3 = state.currentSessionId ? '#/chat/' + state.currentSessionId : '#/'
@@ -93,6 +93,7 @@ function appReducer(state, action) {
         ...state,
         currentSessionId: action.payload.id,
         currentSessionKey: action.payload.key ?? state.currentSessionKey,
+        previewUrl: null,
       }
 
     case 'NEW_CHAT':
@@ -104,6 +105,7 @@ function appReducer(state, action) {
         currentSessionId: null,
         currentSessionKey: generateUUID(),
         chatTitle: null,
+        previewUrl: null,
       }
 
     case 'SET_SESSIONS':

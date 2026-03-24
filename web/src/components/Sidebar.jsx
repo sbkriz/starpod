@@ -140,8 +140,8 @@ function Sidebar({ onSelectSession, onNewChat }) {
       {/* Rail — visible when sidebar is collapsed (desktop only) */}
       <div className="sidebar-rail">
         <button
-          onClick={settingsVisible ? undefined : (sidebarOpen ? closeSidebar : openSidebar)}
-          onMouseEnter={settingsVisible ? () => {
+          onClick={settingsVisible || previewUrl ? undefined : (sidebarOpen ? closeSidebar : openSidebar)}
+          onMouseEnter={(settingsVisible || previewUrl) ? () => {
             const el = document.getElementById('sidebar')
             if (el) el.classList.add('peeking')
           } : undefined}

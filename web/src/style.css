@@ -527,49 +527,53 @@ button.copy-btn.copied { color: var(--color-ok); border-color: var(--color-ok); 
 }
 
 /* ── Sidebar peeking (hover-expand from rail) ── */
-#sidebar.peeking:not(.transient) {
+#sidebar.peeking {
   width: var(--sidebar-w);
   min-width: var(--sidebar-w);
-  z-index: 150;
-  box-shadow: 20px 0 60px rgba(0,0,0,0.5);
 }
-#sidebar.peeking:not(.transient) .sidebar-rail {
+#sidebar.peeking .sidebar-rail {
   display: none;
 }
-#sidebar.peeking:not(.transient) #sidebar-inner {
+#sidebar.peeking #sidebar-inner {
   display: flex;
 }
-#sidebar.peeking:not(.transient) #sidebar-close {
+#sidebar.peeking #sidebar-close {
   display: none;
 }
+
 
 /* ── Sidebar transient mode (when preview is open) ── */
-#sidebar.transient {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 150;
-  width: 0;
-  min-width: 0;
-  border-right-color: transparent;
-  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-              min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+/* Desktop: sidebar stays as 48px rail, not open */
+#sidebar.transient:not(.peeking) {
+  width: 48px;
+  min-width: 48px;
 }
-
-#sidebar.transient .sidebar-rail {
+#sidebar.transient.open:not(.peeking) {
+  width: 48px;
+  min-width: 48px;
+}
+#sidebar.transient:not(.peeking) .sidebar-rail {
+  display: flex;
+}
+#sidebar.transient:not(.peeking) #sidebar-inner {
   display: none;
 }
 
-#sidebar.transient.peeking {
-  width: var(--sidebar-w);
-  min-width: var(--sidebar-w);
-  border-right-color: var(--color-border-subtle);
-  box-shadow: 20px 0 60px rgba(0,0,0,0.5);
-}
-
-#sidebar.transient.peeking #sidebar-inner {
-  display: flex;
+/* Mobile: hide sidebar entirely when preview is open */
+@media (max-width: 768px) {
+  #sidebar.transient {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 150;
+    width: 0;
+    min-width: 0;
+    border-right-color: transparent;
+  }
+  #sidebar.transient .sidebar-rail {
+    display: none;
+  }
 }
 
 /* ── Markdown body ── */
