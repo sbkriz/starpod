@@ -217,7 +217,7 @@ async fn docs_handler(uri: Uri) -> Response {
 /// Build the Axum router with all routes.
 pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
-        .merge(routes::api_routes())
+        .merge(routes::api_routes(Arc::clone(&state)))
         .merge(ws::ws_routes())
         .route("/docs", get(docs_handler))
         .route("/docs/", get(docs_handler))

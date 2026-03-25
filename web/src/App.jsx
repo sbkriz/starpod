@@ -3,7 +3,7 @@ import './style.css'
 import { AppProvider, useApp, isMobile } from './contexts/AppContext'
 import { generateUUID } from './lib/utils'
 import { markSessionRead } from './lib/api'
-import AuthGate from './components/AuthGate'
+import AuthGate, { useUser } from './components/AuthGate'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import Chat from './components/Chat'
@@ -16,6 +16,7 @@ import FilesView from './components/FilesView'
 
 function AppInner() {
   const { state, dispatch } = useApp()
+  const { isAdmin } = useUser()
   const { wsStatus, settingsVisible, cronVisible, filesVisible, currentSessionId, currentSessionKey, previewUrl } = state
   const wsRef = useRef(null)
   const chatRef = useRef(null)
@@ -242,7 +243,7 @@ function AppInner() {
 
         {/* Main app */}
         <div id="app" role="main" className="flex flex-col min-w-0 flex-1">
-          {settingsVisible ? (
+          {settingsVisible && isAdmin ? (
             <SettingsView />
           ) : cronVisible ? (
             <CronJobsView />

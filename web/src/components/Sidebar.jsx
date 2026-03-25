@@ -34,7 +34,7 @@ function groupSessionsByDate(sessions) {
 function Sidebar({ onSelectSession, onNewChat }) {
   const { state, dispatch } = useApp()
   const { sidebarOpen, currentSessionId, sessions, settingsVisible, cronVisible, filesVisible, previewUrl } = state
-  const { user } = useUser()
+  const { user, isAdmin } = useUser()
   const showFiles = !user || user.filesystem_enabled // no user = auth_disabled = show
   const isTransient = sidebarOpen && !!previewUrl
   const [searchQuery, setSearchQuery] = useState('')
@@ -183,13 +183,15 @@ function Sidebar({ onSelectSession, onNewChat }) {
           </button>
         )}
         <div className="flex-1" />
-        <button
-          className={`sidebar-rail-btn${settingsVisible ? ' active' : ''}`}
-          onClick={handleSettingsClick}
-          data-tooltip="Settings"
-        >
-          <GearIcon className="w-4 h-4 stroke-current fill-none stroke-[1.5]" />
-        </button>
+        {isAdmin && (
+          <button
+            className={`sidebar-rail-btn${settingsVisible ? ' active' : ''}`}
+            onClick={handleSettingsClick}
+            data-tooltip="Settings"
+          >
+            <GearIcon className="w-4 h-4 stroke-current fill-none stroke-[1.5]" />
+          </button>
+        )}
       </div>
 
       {/* Expanded sidebar content */}
@@ -291,17 +293,19 @@ function Sidebar({ onSelectSession, onNewChat }) {
           )}
         </div>
 
-        {/* Footer with settings */}
-        <div className="sidebar-footer">
-          <button
-            className={`sidebar-settings-btn${settingsVisible ? ' active' : ''}`}
-            onClick={handleSettingsClick}
-            aria-label="Settings"
-          >
-            <GearIcon className="w-4 h-4 stroke-current fill-none stroke-[1.5]" />
-            <span>Settings</span>
-          </button>
-        </div>
+        {/* Footer with settings (admin only) */}
+        {isAdmin && (
+          <div className="sidebar-footer">
+            <button
+              className={`sidebar-settings-btn${settingsVisible ? ' active' : ''}`}
+              onClick={handleSettingsClick}
+              aria-label="Settings"
+            >
+              <GearIcon className="w-4 h-4 stroke-current fill-none stroke-[1.5]" />
+              <span>Settings</span>
+            </button>
+          </div>
+        )}
       </div>
     </>
   )

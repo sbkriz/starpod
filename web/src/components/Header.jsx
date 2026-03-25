@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useApp } from '../contexts/AppContext'
+import { useUser } from './AuthGate'
 import IconButton from './ui/IconButton'
 import ViewHeader from './ui/ViewHeader'
 import { ChevronDownIcon, EllipsisIcon } from './ui/Icons'
@@ -13,6 +14,7 @@ function modelLabel(spec) {
 
 function Header() {
   const { state, dispatch } = useApp()
+  const { isAdmin } = useUser()
   const { wsStatus, selectedModel, chatTitle } = state
 
   const cfg = window.__STARPOD__ || {}
@@ -89,13 +91,15 @@ function Header() {
             {wsStatus === 'connecting' ? 'connecting...' : 'offline'}
           </span>
         )}
-        <IconButton
-          onClick={() => dispatch({ type: state.settingsVisible ? 'HIDE_SETTINGS' : 'SHOW_SETTINGS' })}
-          aria-label="More options"
-          title="Settings"
-        >
-          <EllipsisIcon className="w-4 h-4" />
-        </IconButton>
+        {isAdmin && (
+          <IconButton
+            onClick={() => dispatch({ type: state.settingsVisible ? 'HIDE_SETTINGS' : 'SHOW_SETTINGS' })}
+            aria-label="More options"
+            title="Settings"
+          >
+            <EllipsisIcon className="w-4 h-4" />
+          </IconButton>
+        )}
       </>}
     />
   )

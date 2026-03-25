@@ -35,7 +35,7 @@ static RE_OG_TITLE2: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Build API routes.
-pub fn api_routes() -> Router<Arc<AppState>> {
+pub fn api_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/auth/verify", get(verify_handler))
         .route("/api/chat", post(chat_handler))
@@ -56,7 +56,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/api/health", get(health_handler))
         .route("/api/cron/jobs", get(list_cron_jobs_handler).post(create_cron_job_handler))
         .route("/api/cron/jobs/{id}", axum::routing::put(update_cron_job_handler).delete(delete_cron_job_handler))
-        .merge(crate::settings::settings_routes())
+        .merge(crate::settings::settings_routes(state))
         .merge(crate::files::files_routes())
 }
 
