@@ -142,6 +142,26 @@ pub struct DeployReadiness {
     pub missing_required: Vec<String>,
 }
 
+impl DeployReadiness {
+    /// Returns keys of optional secrets that are not present remotely but exist in the given local env map.
+    pub fn missing_optional_in_env(&self, local_env: &HashMap<String, String>) -> Vec<String> {
+        self.secrets
+            .iter()
+            .filter(|s| !s.present && !s.required && local_env.contains_key(s.key.as_str()))
+            .map(|s| s.key.clone())
+            .collect()
+    }
+
+    /// Returns keys of required secrets that are missing remotely but exist in the given local env map.
+    pub fn missing_required_in_env(&self, local_env: &HashMap<String, String>) -> Vec<String> {
+        self.missing_required
+            .iter()
+            .filter(|k| local_env.contains_key(k.as_str()))
+            .cloned()
+            .collect()
+    }
+}
+
 /// Summary of what was deployed.
 #[derive(Debug)]
 pub struct DeploySummary {
@@ -1731,5 +1751,99 @@ mod tests {
 
         let diff = client.diff_agent("skill-agent", tmp.path(), Some(&skills_dir)).await.unwrap();
         assert_eq!(diff.to_upload, vec!["skills/my-skill.md"]);
+    }
+
+    // --- DeployReadiness helper tests ---
+
+    fn make_secret(key: &str, required: bool, present: bool) -> SecretStatusInfo {
+        SecretStatusInfo {
+            key: key.to_string(),
+            required,
+            description: String::new(),
+            present,
+            scope: None,
+            hint: None,
+            resolved_from: None,
+        }
+    }
+
+    fn make_readiness(secrets: Vec<SecretStatusInfo>, missing_required: Vec<&str>) -> DeployReadiness {
+        DeployReadiness {
+            version: 1,
+            variables: vec![],
+            secrets,
+            ready: missing_required.is_empty(),
+            missing_required: missing_required.into_iter().map(String::from).collect(),
+        }
+    }
+
+    #[test]
+    fn missing_optional_in_env_finds_matching_keys() {
+        let readiness = make_readiness(
+            vec![
+                make_secret("API_KEY", true, true),
+                make_secret("OPTIONAL_A", false, false),
+                make_secret("OPTIONAL_B", false, false),
+                make_secret("OPTIONAL_C", false, true), // already present
+            ],
+            vec![],
+        );
+        let local_env: HashMap<String, String> = [
+            ("OPTIONAL_A".to_string(), "val_a".to_string()),
+            ("OPTIONAL_C".to_string(), "val_c".to_string()),
+            ("UNRELATED".to_string(), "val".to_string()),
+        ]
+        .into_iter()
+        .collect();
+
+        let result = readiness.missing_optional_in_env(&local_env);
+        assert_eq!(result, vec!["OPTIONAL_A"]);
+    }
+
+    #[test]
+    fn missing_optional_in_env_empty_when_no_env() {
+        let readiness = make_readiness(
+            vec![make_secret("OPT", false, false)],
+            vec![],
+        );
+        let local_env = HashMap::new();
+        assert!(readiness.missing_optional_in_env(&local_env).is_empty());
+    }
+
+    #[test]
+    fn missing_optional_in_env_ignores_required() {
+        let readiness = make_readiness(
+            vec![make_secret("REQ", true, false)],
+            vec!["REQ"],
+        );
+        let local_env: HashMap<String, String> =
+            [("REQ".to_string(), "val".to_string())].into_iter().collect();
+        assert!(readiness.missing_optional_in_env(&local_env).is_empty());
+    }
+
+    #[test]
+    fn missing_required_in_env_finds_matching_keys() {
+        let readiness = make_readiness(
+            vec![
+                make_secret("REQ_A", true, false),
+                make_secret("REQ_B", true, false),
+            ],
+            vec!["REQ_A", "REQ_B"],
+        );
+        let local_env: HashMap<String, String> =
+            [("REQ_A".to_string(), "val".to_string())].into_iter().collect();
+
+        let result = readiness.missing_required_in_env(&local_env);
+        assert_eq!(result, vec!["REQ_A"]);
+    }
+
+    #[test]
+    fn missing_required_in_env_empty_when_no_match() {
+        let readiness = make_readiness(
+            vec![make_secret("REQ", true, false)],
+            vec!["REQ"],
+        );
+        let local_env = HashMap::new();
+        assert!(readiness.missing_required_in_env(&local_env).is_empty());
     }
 }

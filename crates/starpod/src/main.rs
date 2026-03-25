@@ -2517,11 +2517,7 @@ async fn main() -> anyhow::Result<()> {
                             // Try to find them in local .env
                             if local_env.is_some() && !yes {
                                 let local_env = local_env.as_ref().unwrap();
-                                let pushable: Vec<&String> = config
-                                    .missing_required
-                                    .iter()
-                                    .filter(|k| local_env.contains_key(k.as_str()))
-                                    .collect();
+                                let pushable = config.missing_required_in_env(local_env);
 
                                 if !pushable.is_empty() {
                                     println!(
@@ -2591,30 +2587,28 @@ async fn main() -> anyhow::Result<()> {
                         // Handle optional secrets available in local .env
                         if !yes {
                             if let Some(ref local_env) = local_env {
-                                let optional_missing: Vec<_> = config.secrets.iter()
-                                    .filter(|s| !s.present && !s.required && local_env.contains_key(s.key.as_str()))
-                                    .collect();
+                                let optional_pushable = config.missing_optional_in_env(local_env);
 
-                                if !optional_missing.is_empty() {
+                                if !optional_pushable.is_empty() {
                                     println!("\n  Found optional secrets in local .env:");
-                                    for s in &optional_missing {
-                                        let value = &local_env[s.key.as_str()];
-                                        eprint!("  ? Push {} to remote? [y/N] ", s.key.bright_white());
+                                    for key in &optional_pushable {
+                                        let value = &local_env[key.as_str()];
+                                        eprint!("  ? Push {} to remote? [y/N] ", key.bright_white());
                                         let mut buf = String::new();
                                         std::io::stdin().read_line(&mut buf)?;
                                         let answer = buf.trim().to_lowercase();
                                         if answer == "y" || answer == "yes" {
-                                            match deploy_client.set_secret(&agent.id, &s.key, value).await {
+                                            match deploy_client.set_secret(&agent.id, key, value).await {
                                                 Ok(resp) => {
                                                     println!(
                                                         "    {} {} pushed (hint: ••••{})",
                                                         "✓".green(),
-                                                        s.key,
+                                                        key,
                                                         resp.hint.as_deref().unwrap_or("****")
                                                     );
                                                 }
                                                 Err(e) => {
-                                                    eprintln!("    {} Failed to push {}: {}", "✗".red(), s.key, e);
+                                                    eprintln!("    {} Failed to push {}: {}", "✗".red(), key, e);
                                                 }
                                             }
                                         }
