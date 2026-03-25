@@ -4606,6 +4606,7 @@ dependencies = [
  "starpod-memory",
  "starpod-session",
  "starpod-skills",
+ "starpod-vault",
  "tempfile",
  "tokio",
  "tokio-stream",

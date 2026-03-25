@@ -14,6 +14,52 @@ use tracing::debug;
 
 use starpod_core::{StarpodError, Result};
 
+// ── System keys ──────────────────────────────────────────────────────────────
+
+/// Environment variable names that are system-managed secrets.
+///
+/// These keys hold LLM provider credentials, service tokens, and platform
+/// secrets. The agent must never read or overwrite them at runtime.
+///
+/// Used by [`is_system_key`] and the `EnvGet` tool to block agent access.
+///
+/// # Keys
+///
+/// | Category | Keys |
+/// |----------|------|
+/// | LLM providers | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY` |
+/// | Services | `BRAVE_API_KEY`, `TELEGRAM_BOT_TOKEN` |
+/// | Platform | `STARPOD_API_KEY` |
+pub const SYSTEM_KEYS: &[&str] = &[
+    // LLM providers
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GROQ_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "OPENROUTER_API_KEY",
+    // Services
+    "BRAVE_API_KEY",
+    "TELEGRAM_BOT_TOKEN",
+    // Platform
+    "STARPOD_API_KEY",
+];
+
+/// Returns `true` if `key` is a system-managed secret that the agent
+/// must not read or modify at runtime.
+///
+/// Comparison is case-insensitive.
+///
+/// ```
+/// assert!(starpod_vault::is_system_key("ANTHROPIC_API_KEY"));
+/// assert!(starpod_vault::is_system_key("anthropic_api_key"));
+/// assert!(!starpod_vault::is_system_key("MY_CUSTOM_VAR"));
+/// ```
+pub fn is_system_key(key: &str) -> bool {
+    let upper = key.to_uppercase();
+    SYSTEM_KEYS.iter().any(|&k| k == upper)
+}
+
 /// Encrypted credential vault backed by SQLite + AES-256-GCM.
 pub struct Vault {
     pool: SqlitePool,
@@ -336,5 +382,28 @@ mod tests {
         let key1 = derive_master_key(&tmp.path().join("a")).unwrap();
         let key2 = derive_master_key(&tmp.path().join("b")).unwrap();
         assert_ne!(key1, key2);
+    }
+
+    // ── is_system_key tests ──────────────────────────────────────
+
+    #[test]
+    fn test_system_keys_are_recognized() {
+        for key in super::SYSTEM_KEYS {
+            assert!(super::is_system_key(key), "{} should be a system key", key);
+        }
+    }
+
+    #[test]
+    fn test_system_keys_case_insensitive() {
+        assert!(super::is_system_key("anthropic_api_key"));
+        assert!(super::is_system_key("Telegram_Bot_Token"));
+    }
+
+    #[test]
+    fn test_non_system_keys() {
+        assert!(!super::is_system_key("HOME"));
+        assert!(!super::is_system_key("DB_PASSWORD"));
+        assert!(!super::is_system_key("MY_SECRET"));
+        assert!(!super::is_system_key("CUSTOM_TOKEN"));
     }
 }

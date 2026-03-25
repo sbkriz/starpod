@@ -20,6 +20,22 @@ let keys = vault.list_keys().await?; // Vec<String>
 vault.delete("github_token").await?;
 ```
 
+## System Keys
+
+`SYSTEM_KEYS` is a centralized list of environment variable names that hold
+system-managed secrets (LLM provider keys, service tokens, platform secrets).
+The `is_system_key(key)` helper performs a case-insensitive check against this
+list.
+
+The `EnvGet` agent tool uses `is_system_key()` to block the agent from reading
+these values at runtime.
+
+| Category | Keys |
+|----------|------|
+| LLM providers | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY` |
+| Services | `BRAVE_API_KEY`, `TELEGRAM_BOT_TOKEN` |
+| Platform | `STARPOD_API_KEY` |
+
 ## Encryption
 
 - **Algorithm**: AES-256-GCM
@@ -29,4 +45,4 @@ vault.delete("github_token").await?;
 
 ## Tests
 
-7 unit tests.
+10 unit tests + 3 doc-tests.

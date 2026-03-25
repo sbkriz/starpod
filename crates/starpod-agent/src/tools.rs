@@ -926,10 +926,8 @@ pub async fn handle_custom_tool(
 
             debug!(key = %key, "EnvGet");
 
-            // Block sensitive environment variables
-            let upper = key.to_uppercase();
-            const BLOCKED: &[&str] = &["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"];
-            if BLOCKED.iter().any(|pat| upper.contains(pat)) {
+            // Block system-managed secrets (API keys, tokens, etc.)
+            if starpod_vault::is_system_key(key) {
                 return Some(ToolResult {
                     content: format!("Access to environment variable '{}' is restricted.", key),
                     is_error: true,
@@ -2502,20 +2500,20 @@ mod tests {
             vault: None,
         };
 
-        // All of these should be blocked
-        for key in &["ANTHROPIC_API_KEY", "STARPOD_API_KEY", "TELEGRAM_BOT_TOKEN",
-                     "DB_PASSWORD", "MY_SECRET", "AWS_CREDENTIAL", "OAUTH_AUTH_CODE"] {
+        // System keys should be blocked
+        for key in starpod_vault::SYSTEM_KEYS {
             let result = handle_custom_tool(
                 &ctx,
                 "EnvGet",
                 &serde_json::json!({"key": key}),
             ).await.unwrap();
-            assert!(result.is_error, "EnvGet should block sensitive var: {}", key);
+            assert!(result.is_error, "EnvGet should block system key: {}", key);
             assert!(result.content.contains("restricted"));
         }
 
-        // These should be allowed
-        for key in &["HOME", "PATH", "LANG", "TERM", "SHELL"] {
+        // Non-system keys (even with "KEY"/"SECRET"/"TOKEN" in the name) should be allowed
+        for key in &["HOME", "PATH", "LANG", "TERM", "SHELL",
+                     "DB_PASSWORD", "MY_SECRET", "AWS_CREDENTIAL", "OAUTH_AUTH_CODE"] {
             let result = handle_custom_tool(
                 &ctx,
                 "EnvGet",
