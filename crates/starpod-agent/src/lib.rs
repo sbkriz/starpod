@@ -816,7 +816,21 @@ impl StarpodAgent {
         Box::new(move |tool_name, input| {
             let ctx = Arc::clone(&ctx);
             Box::pin(async move {
-                handle_custom_tool(&ctx, &tool_name, &input).await
+                let result = handle_custom_tool(&ctx, &tool_name, &input).await;
+                // If a known custom tool returned None, it means required parameters
+                // were missing/invalid (the `?` operator on Option bailed out).
+                // Return an explicit error instead of falling through to the built-in
+                // executor which doesn't know about these tools.
+                if result.is_none() && CUSTOM_TOOLS.contains(&tool_name.as_str()) {
+                    return Some(agent_sdk::ToolResult {
+                        content: format!(
+                            "Invalid or missing parameters for tool '{tool_name}'. Input received: {input}"
+                        ),
+                        is_error: true,
+                        raw_content: None,
+                    });
+                }
+                result
             })
         })
     }

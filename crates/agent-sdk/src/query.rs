@@ -857,7 +857,7 @@ async fn run_agent_loop(
                             match executor.execute(name, input.clone()).await {
                                 Ok(tr) => tr,
                                 Err(e) => ToolResult {
-                                    content: format!("Tool execution error: {}", e),
+                                    content: format!("{}", e),
                                     is_error: true,
                                     raw_content: None,
                                 },
@@ -867,7 +867,7 @@ async fn run_agent_loop(
                         match executor.execute(name, input.clone()).await {
                             Ok(tr) => tr,
                             Err(e) => ToolResult {
-                                content: format!("Tool execution error: {}", e),
+                                content: format!("{}", e),
                                 is_error: true,
                                 raw_content: None,
                             },
