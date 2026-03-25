@@ -274,7 +274,7 @@ enum AgentCommand {
 #[derive(Subcommand)]
 enum InstanceCommand {
     /// Create a new remote instance (validates deploy.toml if present).
-    Create {
+    New {
         /// Agent name from agents/ directory.
         #[arg(short, long)]
         agent: Option<String>,
@@ -2411,7 +2411,7 @@ async fn main() -> anyhow::Result<()> {
             let client = InstanceClient::new_with_timeout(&backend_url, api_key, 30)?;
 
             match action {
-                InstanceCommand::Create { agent: agent_name, name: _, region, var_overrides, yes } => {
+                InstanceCommand::New { agent: agent_name, name: _, region, var_overrides, yes } => {
                     // Need the DeployClient for the deploy-config API
                     let api_key_str = std::env::var("STARPOD_API_KEY")
                         .ok()

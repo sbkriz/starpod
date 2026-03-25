@@ -90,12 +90,13 @@ let _ = shutdown.send(());  // Stop monitoring
 ## CLI
 
 ```bash
-starpod instance create                         # Create a new instance
-starpod instance create --name "my-bot" --region "us-east-1"
+starpod instance new --agent my-agent            # Create a new instance
+starpod instance new -a my-agent --name "my-bot" --region "us-east-1"
 starpod instance list                           # List all instances
-starpod instance kill <id>                      # Terminate an instance
-starpod instance pause <id>                     # Suspend an instance
-starpod instance restart <id>                   # Resume a paused instance
+starpod instance destroy <id>                   # Permanently destroy an instance
+starpod instance stop <id>                      # Stop an instance (preserves disk)
+starpod instance start <id>                     # Start a stopped instance
+starpod instance restart <id>                   # Restart an instance
 starpod instance logs <id> [--tail N]           # Stream logs (default: 50 lines)
 starpod instance ssh <id>                       # SSH into an instance
 starpod instance health <id>                    # Check instance health

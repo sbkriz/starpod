@@ -47,6 +47,30 @@ starpod agent new my-agent --agent-name "Jarvis" --model "claude-opus-4-6"
 
 List all agents in the workspace.
 
+### `starpod agent push <name>`
+
+Push a local agent blueprint to the remote (Spawner). Uploads the agent's config, personality, and skill files.
+
+```bash
+starpod agent push my-agent
+```
+
+### `starpod agent pull <name>`
+
+Pull a remote agent blueprint to the local workspace. Downloads any changes made on the platform.
+
+```bash
+starpod agent pull my-agent
+```
+
+### `starpod agent diff <name>`
+
+Show what would change on push or pull, without modifying anything.
+
+```bash
+starpod agent diff my-agent
+```
+
 ### `starpod dev`
 
 Apply blueprint and start agent in dev mode (workspace only).
@@ -116,15 +140,38 @@ starpod build --agent agents/my-agent --skills skills/ --output /srv/my-agent --
 | `--skills` | Path to skills folder to include | — |
 | `--output` | Where to create the `.starpod/` directory | Current directory |
 | `--env` | Path to `.env` file to include | — |
+| `--force` | Overwrite existing `.starpod/` blueprint files | — |
 
 Creates a self-contained `.starpod/` at the output directory, ready for `starpod serve`.
 
 ### `starpod deploy`
 
-Deploy stub (future).
+Deploy stub (future). Currently, use `starpod agent push` + `starpod instance create` instead.
+
+## Auth
+
+### `starpod auth login`
+
+Authenticate with the Starpod platform. Opens a browser for login.
 
 ```bash
-starpod deploy <agent_name>
+starpod auth login
+```
+
+### `starpod auth logout`
+
+Remove saved credentials.
+
+```bash
+starpod auth logout
+```
+
+### `starpod auth status`
+
+Show current authentication status.
+
+```bash
+starpod auth status
 ```
 
 ## Memory
@@ -288,19 +335,22 @@ starpod cron edit "morning-reminder" --schedule "0 9 * * *" --enabled false
 
 Manage remote cloud instances. Requires `STARPOD_INSTANCE_BACKEND_URL` env var.
 
-### `starpod instance create`
+### `starpod instance new`
 
-Create a new remote instance.
+Create a new remote instance from a pushed agent blueprint.
 
 ```bash
-starpod instance create
-starpod instance create --name "my-bot" --region "us-east-1"
+starpod instance new --agent my-agent
+starpod instance new --agent my-agent --name "my-bot" --region "us-east-1"
+starpod instance new --agent my-agent --var "OPENAI_KEY=sk-..." --var "DEBUG=true"
 ```
 
 | Flag | Description |
 |------|-------------|
+| `--agent`, `-a` | Agent name from `agents/` directory |
 | `--name`, `-n` | Display name for the instance |
 | `--region`, `-r` | Deployment region |
+| `--var` | Variable overrides (`KEY=VALUE`), can be used multiple times |
 
 ### `starpod instance list`
 
@@ -310,25 +360,33 @@ List all instances with status and region.
 starpod instance list
 ```
 
-### `starpod instance kill`
+### `starpod instance destroy`
 
-Terminate a running instance.
+Permanently destroy an instance and all its runtime state.
 
 ```bash
-starpod instance kill <id>
+starpod instance destroy <id>
 ```
 
-### `starpod instance pause`
+### `starpod instance stop`
 
-Suspend a running instance.
+Stop a running instance (preserves disk).
 
 ```bash
-starpod instance pause <id>
+starpod instance stop <id>
+```
+
+### `starpod instance start`
+
+Start a stopped instance.
+
+```bash
+starpod instance start <id>
 ```
 
 ### `starpod instance restart`
 
-Resume a paused instance.
+Restart a running or stopped instance.
 
 ```bash
 starpod instance restart <id>

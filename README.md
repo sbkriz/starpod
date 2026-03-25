@@ -33,7 +33,7 @@ Starpod is an open-source AI agent runtime built in Rust. Define an agent once �
                │  skills · config    │
                │  tools · personality│
                └────────┬────────────┘
-                        │  starpod deploy
+                        │  starpod agent push + instance new
           ┌─────────────┼─────────────┐
           ▼             ▼             ▼
     ┌───────────┐ ┌───────────┐ ┌───────────┐
@@ -81,7 +81,15 @@ starpod dev my-agent
   Model     claude-haiku-4-5
 ```
 
-Or deploy to [Starpod Console](https://console.starpod.sh) — one-click deploy, real-time logs, secrets vault, usage analytics. Managed cloud or your own (AWS, GCP, Azure).
+Or deploy to [Starpod Console](https://console.starpod.sh):
+
+```bash
+starpod auth login
+starpod agent push my-agent
+starpod instance new --agent my-agent
+```
+
+Managed cloud or self-hosted (AWS, GCP, Azure). Real-time logs, secrets vault, usage analytics.
 
 ## Highlights
 
@@ -233,6 +241,18 @@ starpod cron list                     List cron jobs
 starpod cron remove <name>            Remove cron job
 starpod cron runs <name>              Show run history
 starpod cron run <name>               Trigger immediately
+
+starpod auth login                    Authenticate with platform
+starpod agent push <name>             Push blueprint to platform
+starpod agent pull <name>             Pull blueprint from platform
+starpod instance new -a <agent>       Create remote instance
+starpod instance list                 List remote instances
+starpod instance destroy <id>         Destroy instance
+starpod instance stop <id>            Stop instance
+starpod instance start <id>           Start instance
+starpod instance logs <id>            Stream logs
+starpod instance ssh <id>             SSH into instance
+starpod instance health <id>          Health metrics
 ```
 
 ## Development
