@@ -1,11 +1,5 @@
-mod schema;
-
-use std::path::Path;
-use std::str::FromStr;
-
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use tracing::debug;
 use uuid::Uuid;
@@ -99,33 +93,11 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
-    /// Create a new SessionManager.
-    pub async fn new(db_path: &Path) -> Result<Self> {
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let opts = SqliteConnectOptions::from_str(
-            &format!("sqlite://{}?mode=rwc", db_path.display()),
-        )
-        .map_err(|e| StarpodError::Database(format!("Invalid DB path: {}", e)))?;
-
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect_with(opts)
-            .await
-            .map_err(|e| StarpodError::Database(format!("Failed to open session db: {}", e)))?;
-
-        schema::run_migrations(&pool).await?;
-
-        Ok(Self { pool })
-    }
-
-    /// Create a SessionManager from an existing pool (for testing).
-    #[cfg(test)]
-    async fn from_pool(pool: SqlitePool) -> Result<Self> {
-        schema::run_migrations(&pool).await?;
-        Ok(Self { pool })
+    /// Create a SessionManager from a shared pool.
+    ///
+    /// The pool should already have migrations applied (via `CoreDb`).
+    pub fn from_pool(pool: SqlitePool) -> Self {
+        Self { pool }
     }
 
     /// Resolve session for a given channel and key.
@@ -782,10 +754,8 @@ mod tests {
 
     async fn setup() -> (TempDir, SessionManager) {
         let tmp = TempDir::new().unwrap();
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        let mgr = SessionManager::from_pool(pool)
-            .await
-            .unwrap();
+        let db = starpod_db::CoreDb::in_memory().await.unwrap();
+        let mgr = SessionManager::from_pool(db.pool().clone());
         (tmp, mgr)
     }
 

@@ -365,15 +365,12 @@ impl CronScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema;
     use crate::types::{Schedule, SessionMode};
-    use sqlx::SqlitePool;
     use std::sync::atomic::{AtomicU32, Ordering};
 
     async fn setup() -> Arc<CronStore> {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        schema::run_migrations(&pool).await.unwrap();
-        Arc::new(CronStore::from_pool(pool))
+        let db = starpod_db::CoreDb::in_memory().await.unwrap();
+        Arc::new(CronStore::from_pool(db.pool().clone()))
     }
 
     fn success_executor() -> JobExecutor {

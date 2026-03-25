@@ -310,6 +310,10 @@ fn build_creates_starpod_directory() {
         "# Soul\n\nYou are TestBot.\n",
     ).unwrap();
 
+    // Provide .env with required secrets so build validation passes
+    let env_file = tmp.path().join("test.env");
+    fs::write(&env_file, "ANTHROPIC_API_KEY=sk-test-dummy\n").unwrap();
+
     let output_dir = tmp.path().join("deploy");
     fs::create_dir_all(&output_dir).unwrap();
 
@@ -318,6 +322,7 @@ fn build_creates_starpod_directory() {
             "build",
             "--agent", agent_dir.to_str().unwrap(),
             "--output", output_dir.to_str().unwrap(),
+            "--env", env_file.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -355,8 +360,9 @@ fn build_with_env_file() {
     fs::create_dir_all(&agent_dir).unwrap();
     fs::write(agent_dir.join("agent.toml"), "agent_name = \"Bot\"\n").unwrap();
 
+    // Include required ANTHROPIC_API_KEY alongside custom vars
     let env_file = tmp.path().join("prod.env");
-    fs::write(&env_file, "API_KEY=secret123\n").unwrap();
+    fs::write(&env_file, "ANTHROPIC_API_KEY=sk-test-dummy\nAPI_KEY=secret123\n").unwrap();
 
     let output_dir = tmp.path().join("deploy");
     fs::create_dir_all(&output_dir).unwrap();
@@ -371,8 +377,10 @@ fn build_with_env_file() {
         .assert()
         .success();
 
-    let env_content = fs::read_to_string(output_dir.join(".starpod/.env")).unwrap();
-    assert!(env_content.contains("API_KEY=secret123"));
+    // .env is NOT copied into the instance (secrets go into vault at serve time).
+    // Verify the build succeeded by checking the output structure exists.
+    assert!(output_dir.join(".starpod/config/agent.toml").is_file());
+    assert!(output_dir.join(".starpod/db").is_dir());
 }
 
 #[test]
@@ -382,6 +390,10 @@ fn build_with_skills() {
     let agent_dir = tmp.path().join("my-agent");
     fs::create_dir_all(&agent_dir).unwrap();
     fs::write(agent_dir.join("agent.toml"), "agent_name = \"Bot\"\n").unwrap();
+
+    // Provide .env with required secrets so build validation passes
+    let env_file = tmp.path().join("test.env");
+    fs::write(&env_file, "ANTHROPIC_API_KEY=sk-test-dummy\n").unwrap();
 
     let skills_dir = tmp.path().join("skills");
     fs::create_dir_all(skills_dir.join("greet")).unwrap();
@@ -399,6 +411,7 @@ fn build_with_skills() {
             "--agent", agent_dir.to_str().unwrap(),
             "--skills", skills_dir.to_str().unwrap(),
             "--output", output_dir.to_str().unwrap(),
+            "--env", env_file.to_str().unwrap(),
         ])
         .assert()
         .success();

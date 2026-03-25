@@ -11,3 +11,7 @@ description = "Unified SQLite database (core.db) for Starpod — sessions, cron,
 starpod-core = { workspace = true }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"

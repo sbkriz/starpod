@@ -201,23 +201,24 @@ pub struct AuthBootstrap {
 }
 
 pub async fn create_auth_store(paths: &ResolvedPaths) -> starpod_core::Result<AuthBootstrap> {
-    let auth_db_path = paths.db_dir.join("users.db");
-    let auth = Arc::new(AuthStore::new(&auth_db_path).await
-        .map_err(|e| starpod_core::StarpodError::Auth(format!("Failed to init auth store: {}", e)))?);
+    let core_db = starpod_db::CoreDb::new(&paths.db_dir).await?;
+    let auth = Arc::new(AuthStore::from_pool(core_db.pool().clone()));
+    let admin_key = bootstrap_auth(&auth).await?;
+    Ok(AuthBootstrap { store: auth, admin_key })
+}
 
-    // Bootstrap admin user
+/// Bootstrap the admin user and return the API key if newly created.
+async fn bootstrap_auth(auth: &Arc<AuthStore>) -> starpod_core::Result<Option<String>> {
     let existing_api_key = std::env::var("STARPOD_API_KEY").ok();
-    let admin_key = if let Some((admin, key)) = auth.bootstrap_admin(existing_api_key.as_deref()).await? {
+    if let Some((admin, key)) = auth.bootstrap_admin(existing_api_key.as_deref()).await? {
         info!(user_id = %admin.id, "Admin user bootstrapped");
         if existing_api_key.is_none() {
             info!(api_key = %key, "New admin API key generated — save this!");
         }
-        Some(key)
+        Ok(Some(key))
     } else {
-        None
-    };
-
-    Ok(AuthBootstrap { store: auth, admin_key })
+        Ok(None)
+    }
 }
 
 pub async fn serve_with_agent(
@@ -266,10 +267,14 @@ pub async fn serve_with_agent(
     let _lifecycle_handle = agent.run_lifecycle();
     info!("Lifecycle prompts dispatched");
 
-    // Use pre-created auth store or create a new one
+    // Use pre-created auth store or create one from the agent's shared pool
     let auth = match existing_auth {
         Some(a) => a,
-        None => create_auth_store(&paths).await?.store,
+        None => {
+            let store = Arc::new(AuthStore::from_pool(agent.core_db().pool().clone()));
+            let _ = bootstrap_auth(&store).await?;
+            store
+        }
     };
 
     // Create rate limiter from config

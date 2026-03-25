@@ -2406,7 +2406,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let memory = Arc::new(starpod_memory::MemoryStore::new(&tmp.path().join("agent"), &tmp.path().join("agent").join("config"), &tmp.path().join("db")).await.unwrap());
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
-        let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
+        let cron = Arc::new(starpod_cron::CronStore::from_pool(core_db.pool().clone()));
 
         let ctx = ToolContext {
             memory,
@@ -2444,7 +2445,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let memory = Arc::new(starpod_memory::MemoryStore::new(&tmp.path().join("agent"), &tmp.path().join("agent").join("config"), &tmp.path().join("db")).await.unwrap());
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
-        let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
+        let cron = Arc::new(starpod_cron::CronStore::from_pool(core_db.pool().clone()));
 
         let ctx = ToolContext {
             memory,
@@ -2480,7 +2482,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let memory = Arc::new(starpod_memory::MemoryStore::new(&tmp.path().join("agent"), &tmp.path().join("agent").join("config"), &tmp.path().join("db")).await.unwrap());
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
-        let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
+        let cron = Arc::new(starpod_cron::CronStore::from_pool(core_db.pool().clone()));
 
         let ctx = ToolContext {
             memory,
@@ -2530,7 +2533,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let memory = Arc::new(starpod_memory::MemoryStore::new(&tmp.path().join("agent"), &tmp.path().join("agent").join("config"), &tmp.path().join("db")).await.unwrap());
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
-        let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
+        let cron = Arc::new(starpod_cron::CronStore::from_pool(core_db.pool().clone()));
 
         let home_dir = tmp.path().join("instance");
         std::fs::create_dir_all(&home_dir).unwrap();
@@ -2576,7 +2580,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let memory = Arc::new(starpod_memory::MemoryStore::new(&tmp.path().join("agent"), &tmp.path().join("agent").join("config"), &tmp.path().join("db")).await.unwrap());
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
-        let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
+        let cron = Arc::new(starpod_cron::CronStore::from_pool(core_db.pool().clone()));
 
         let home_dir = tmp.path().join("instance");
         std::fs::create_dir_all(home_dir.join(".starpod")).unwrap();
@@ -2615,7 +2620,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let memory = Arc::new(starpod_memory::MemoryStore::new(&tmp.path().join("agent"), &tmp.path().join("agent").join("config"), &tmp.path().join("db")).await.unwrap());
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
-        let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
+        let cron = Arc::new(starpod_cron::CronStore::from_pool(core_db.pool().clone()));
 
         let home_dir = tmp.path().join("instance");
         std::fs::create_dir_all(&home_dir).unwrap();
@@ -2653,7 +2659,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let memory = Arc::new(starpod_memory::MemoryStore::new(&tmp.path().join("agent"), &tmp.path().join("agent").join("config"), &tmp.path().join("db")).await.unwrap());
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
-        let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
+        let cron = Arc::new(starpod_cron::CronStore::from_pool(core_db.pool().clone()));
 
         let home_dir = tmp.path().join("instance");
         let starpod = home_dir.join(".starpod");
@@ -2691,7 +2698,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let memory = Arc::new(starpod_memory::MemoryStore::new(&tmp.path().join("agent"), &tmp.path().join("agent").join("config"), &tmp.path().join("db")).await.unwrap());
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
-        let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
+        let cron = Arc::new(starpod_cron::CronStore::from_pool(core_db.pool().clone()));
 
         let home_dir = tmp.path().join("instance");
         std::fs::create_dir_all(&home_dir).unwrap();
@@ -2742,8 +2750,9 @@ mod tests {
         let skills = Arc::new(
             starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap(),
         );
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
         let cron = Arc::new(
-            starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap(),
+            starpod_cron::CronStore::from_pool(core_db.pool().clone()),
         );
 
         ToolContext {
@@ -3077,7 +3086,8 @@ mod tests {
             ).await.unwrap(),
         );
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
-        let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
+        let cron = Arc::new(starpod_cron::CronStore::from_pool(core_db.pool().clone()));
 
         ToolContext {
             memory,
@@ -3225,7 +3235,8 @@ mod tests {
             ).await.unwrap(),
         );
         let skills = Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
-        let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
+        let cron = Arc::new(starpod_cron::CronStore::from_pool(core_db.pool().clone()));
 
         ToolContext {
             memory,
@@ -3587,7 +3598,8 @@ mod tests {
                 .await.unwrap(),
         );
         let skills = Arc::new(SkillStore::new(&tmp.path().join("skills")).unwrap());
-        let cron = Arc::new(CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
+        let cron = Arc::new(CronStore::from_pool(core_db.pool().clone()));
         ToolContext {
             memory,
             user_view: None,
@@ -3753,7 +3765,8 @@ mod tests {
             .unwrap(),
         );
         let skills = Arc::new(SkillStore::new(&tmp.path().join("skills")).unwrap());
-        let cron = Arc::new(starpod_cron::CronStore::new(&tmp.path().join("cron.db")).await.unwrap());
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
+        let cron = Arc::new(starpod_cron::CronStore::from_pool(core_db.pool().clone()));
 
         ToolContext {
             memory,

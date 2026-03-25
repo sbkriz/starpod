@@ -434,7 +434,8 @@ mod tests {
             env_file: None,
         };
 
-        let auth = Arc::new(AuthStore::new(&db_dir.join("users.db")).await.unwrap());
+        let core_db = starpod_db::CoreDb::new(&db_dir).await.unwrap();
+        let auth = Arc::new(AuthStore::from_pool(core_db.pool().clone()));
         let rate_limiter = Arc::new(RateLimiter::new(0, Duration::from_secs(60)));
 
         let state = Arc::new(AppState {

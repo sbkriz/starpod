@@ -1,15 +1,13 @@
-use std::path::Path;
+use std::str::FromStr;
 
 use chrono::{DateTime, Duration, Utc};
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
+use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
-use std::str::FromStr;
 use tracing::warn;
 use uuid::Uuid;
 
 use starpod_core::{StarpodError, Result};
 
-use crate::schema;
 use crate::types::*;
 
 /// Manages cron jobs in SQLite.
@@ -20,39 +18,11 @@ pub struct CronStore {
 }
 
 impl CronStore {
-    /// Create a `CronStore` from an existing pool (used in tests with in-memory databases).
-    #[cfg(test)]
-    pub(crate) fn from_pool(pool: SqlitePool) -> Self {
+    /// Create a `CronStore` from a shared pool.
+    ///
+    /// The pool should already have migrations applied (via `CoreDb`).
+    pub fn from_pool(pool: SqlitePool) -> Self {
         Self { pool, default_max_retries: 3, default_timeout_secs: 7200 }
-    }
-
-    /// Open or create the cron database.
-    pub async fn new(db_path: &Path) -> Result<Self> {
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let opts = SqliteConnectOptions::from_str(&format!(
-            "sqlite://{}?mode=rwc",
-            db_path.display()
-        ))
-        .map_err(|e| StarpodError::Database(format!("Invalid DB path: {}", e)))?;
-
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect_with(opts)
-            .await
-            .map_err(|e| StarpodError::Database(format!("Failed to open cron db: {}", e)))?;
-
-        // Enable foreign keys
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await
-            .map_err(|e| StarpodError::Database(format!("Failed to enable foreign keys: {}", e)))?;
-
-        schema::run_migrations(&pool).await?;
-
-        Ok(Self { pool, default_max_retries: 3, default_timeout_secs: 7200 })
     }
 
     /// Set the default max retries for new jobs added via `add_job()`.
@@ -657,9 +627,8 @@ mod tests {
     use super::*;
 
     async fn setup() -> CronStore {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        schema::run_migrations(&pool).await.unwrap();
-        CronStore::from_pool(pool)
+        let db = starpod_db::CoreDb::in_memory().await.unwrap();
+        CronStore::from_pool(db.pool().clone())
     }
 
     #[tokio::test]

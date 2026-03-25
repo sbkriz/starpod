@@ -19,6 +19,7 @@ use starpod_core::{
     AgentConfig, ResolvedPaths,
 };
 use starpod_cron::CronStore;
+use starpod_db::CoreDb;
 use starpod_memory::{MemoryStore, UserMemoryView};
 use starpod_session::{Channel, SessionDecision, SessionManager, UsageRecord};
 use starpod_skills::SkillStore;
@@ -51,6 +52,7 @@ pub struct StarpodAgent {
     skills: Arc<SkillStore>,
     cron: Arc<CronStore>,
     vault: Option<Arc<starpod_vault::Vault>>,
+    core_db: Arc<CoreDb>,
     paths: ResolvedPaths,
     config: RwLock<StarpodConfig>,
 }
@@ -130,20 +132,18 @@ impl StarpodAgent {
             debug!("Vector search enabled with local embedder");
         }
 
-        // Session DB in db_dir
-        std::fs::create_dir_all(&paths.db_dir).map_err(|e| {
-            StarpodError::Config(format!("Failed to create db dir {}: {}", paths.db_dir.display(), e))
-        })?;
-        let session_db = paths.db_dir.join("session.db");
-        let session_mgr = SessionManager::new(&session_db).await?;
+        // Unified core database (sessions + cron + auth)
+        let core_db = Arc::new(CoreDb::new(&paths.db_dir).await?);
+        let pool = core_db.pool().clone();
+
+        let session_mgr = SessionManager::from_pool(pool.clone());
 
         // Skills from resolved skills_dir, with optional filter
         let skills = SkillStore::new(&paths.skills_dir)?
             .with_filter(agent_config.skills.clone());
 
-        // Cron in db_dir
-        let cron_db = paths.db_dir.join("cron.db");
-        let mut cron = CronStore::new(&cron_db).await?;
+        // Cron from shared pool
+        let mut cron = CronStore::from_pool(pool);
         cron.set_default_max_retries(config.cron.default_max_retries);
         cron.set_default_timeout_secs(config.cron.default_timeout_secs);
 
@@ -165,6 +165,7 @@ impl StarpodAgent {
             skills: Arc::new(skills),
             cron: Arc::new(cron),
             vault,
+            core_db,
             paths,
             config: RwLock::new(config),
         })
@@ -173,6 +174,11 @@ impl StarpodAgent {
     /// Get the resolved paths.
     pub fn paths(&self) -> &ResolvedPaths {
         &self.paths
+    }
+
+    /// Get the shared core database.
+    pub fn core_db(&self) -> &Arc<CoreDb> {
+        &self.core_db
     }
 
     /// Snapshot the current config (cheap clone, no lock held after return).
@@ -1532,8 +1538,8 @@ mod tests {
         // Skills dir should exist
         assert!(tmp.path().join("skills").exists());
 
-        // Cron db should exist in db/
-        assert!(tmp.path().join("db").join("cron.db").exists());
+        // Core db should exist in db/
+        assert!(tmp.path().join("db").join("core.db").exists());
     }
 
     #[tokio::test]
@@ -1579,9 +1585,8 @@ mod tests {
         let ctx = agent.memory().bootstrap_context().unwrap();
         assert!(ctx.contains("TestBot") || ctx.contains("Aster"));
 
-        // DB dir should have session.db
-        assert!(db_dir.join("session.db").exists());
-        assert!(db_dir.join("cron.db").exists());
+        // DB dir should have core.db (unified sessions + cron + auth)
+        assert!(db_dir.join("core.db").exists());
     }
 
     #[tokio::test]

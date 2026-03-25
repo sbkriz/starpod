@@ -18,6 +18,7 @@ starpod-memory = { workspace = true }
 starpod-session = { workspace = true }
 starpod-skills = { workspace = true }
 starpod-cron = { workspace = true }
+starpod-db = { workspace = true }
 starpod-browser = { workspace = true }
 starpod-vault = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }

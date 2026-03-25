@@ -4603,6 +4603,7 @@ dependencies = [
  "starpod-browser",
  "starpod-core",
  "starpod-cron",
+ "starpod-db",
  "starpod-memory",
  "starpod-session",
  "starpod-skills",
@@ -4655,6 +4656,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "starpod-core",
+ "starpod-db",
  "tempfile",
  "tokio",
  "tracing",
@@ -4700,6 +4702,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "starpod-core",
+ "starpod-db",
  "tempfile",
  "tokio",
  "tracing",
@@ -4712,6 +4715,8 @@ version = "0.1.0-alpha.3"
 dependencies = [
  "sqlx",
  "starpod-core",
+ "tempfile",
+ "tokio",
  "tracing",
 ]
 
@@ -4737,6 +4742,7 @@ dependencies = [
  "starpod-auth",
  "starpod-core",
  "starpod-cron",
+ "starpod-db",
  "starpod-instances",
  "starpod-memory",
  "starpod-session",
@@ -4811,6 +4817,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "starpod-core",
+ "starpod-db",
  "tempfile",
  "tokio",
  "tracing",

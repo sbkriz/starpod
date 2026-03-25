@@ -22,7 +22,6 @@
 //! and retry-eligible jobs. Each job is executed via a [`JobExecutor`] callback that
 //! receives a [`JobContext`] containing the prompt, session mode, and job metadata.
 
-mod schema;
 pub mod scheduler;
 pub mod store;
 pub mod types;

@@ -18,10 +18,11 @@
 //!
 //! ```no_run
 //! # async fn example() -> starpod_core::Result<()> {
-//! use std::path::Path;
 //! use starpod_auth::{AuthStore, Role};
+//! use starpod_db::CoreDb;
 //!
-//! let store = AuthStore::new(Path::new(".starpod/db/users.db")).await?;
+//! let db = CoreDb::new(std::path::Path::new(".starpod/db")).await?;
+//! let store = AuthStore::from_pool(db.pool().clone());
 //! let user = store.create_user(None, Some("Alice"), Role::User).await?;
 //! let key = store.create_api_key(&user.id, Some("web")).await?;
 //! // key.key is the plaintext — show it once, then discard
@@ -34,14 +35,9 @@
 
 pub mod api_key;
 pub mod rate_limit;
-mod schema;
 pub mod types;
 
-use std::path::Path;
-use std::str::FromStr;
-
 use chrono::Utc;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use tracing::{debug, info};
 use uuid::Uuid;
@@ -62,33 +58,11 @@ pub struct AuthStore {
 }
 
 impl AuthStore {
-    /// Open (or create) the auth store at the given database path.
-    pub async fn new(db_path: &Path) -> Result<Self> {
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let opts = SqliteConnectOptions::from_str(
-            &format!("sqlite://{}?mode=rwc", db_path.display()),
-        )
-        .map_err(|e| StarpodError::Database(format!("Invalid DB path: {}", e)))?;
-
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect_with(opts)
-            .await
-            .map_err(|e| StarpodError::Database(format!("Failed to open auth db: {}", e)))?;
-
-        schema::run_migrations(&pool).await?;
-
-        Ok(Self { pool })
-    }
-
-    /// Create from an existing pool (for testing).
-    #[cfg(test)]
-    async fn from_pool(pool: SqlitePool) -> Result<Self> {
-        schema::run_migrations(&pool).await?;
-        Ok(Self { pool })
+    /// Create an AuthStore from a shared pool.
+    ///
+    /// The pool should already have migrations applied (via `CoreDb`).
+    pub fn from_pool(pool: SqlitePool) -> Self {
+        Self { pool }
     }
 
     // ── User CRUD ────────────────────────────────────────────────────────
@@ -656,11 +630,8 @@ mod tests {
     use super::*;
 
     async fn test_store() -> AuthStore {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        AuthStore::from_pool(pool).await.unwrap()
+        let db = starpod_db::CoreDb::in_memory().await.unwrap();
+        AuthStore::from_pool(db.pool().clone())
     }
 
     #[tokio::test]

@@ -20,4 +20,5 @@ cron = "0.15"
 chrono-tz = "0.10"
 
 [dev-dependencies]
+starpod-db = { workspace = true }
 tempfile = "3"
