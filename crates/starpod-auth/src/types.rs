@@ -95,11 +95,11 @@ pub struct ApiKeyCreated {
 
 /// A linked Telegram account.
 ///
-/// One Telegram ID maps to exactly one user. Relinking replaces the previous
-/// association (INSERT OR REPLACE).
+/// A link can be created with just a username (telegram_id filled when the
+/// user first messages the bot) or with a numeric Telegram ID directly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelegramLink {
-    pub telegram_id: i64,
+    pub telegram_id: Option<i64>,
     pub user_id: String,
     pub username: Option<String>,
     pub linked_at: DateTime<Utc>,

@@ -1,9 +1,8 @@
 //! Unified SQLite database for Starpod's transactional data.
 //!
-//! Consolidates sessions, cron scheduling, and authentication into a single
-//! `core.db` file, replacing the previous `session.db` + `cron.db` + `users.db`
-//! setup. A single shared connection pool (WAL mode, foreign keys enabled)
-//! serves all three domains.
+//! All transactional data (sessions, cron scheduling, authentication) lives in
+//! a single `core.db` file. A shared connection pool (WAL mode, foreign keys
+//! enabled) serves all three domains.
 //!
 //! # Architecture
 //!
@@ -22,12 +21,6 @@
 //! - **memory.db** — FTS5 + vector blobs, bulk reindex I/O, different access pattern
 //! - **vault.db** — AES-256-GCM encrypted, optional (needs `.vault_key`), isolated security boundary
 //!
-//! # Legacy migration
-//!
-//! On first open, [`CoreDb::new`] detects old `session.db` / `cron.db` / `users.db`
-//! in the same directory and migrates their data into `core.db`, then renames the
-//! old files to `*.db.migrated`.
-//!
 //! # Usage
 //!
 //! ```no_run
@@ -39,8 +32,6 @@
 //! # Ok(())
 //! # }
 //! ```
-
-mod migrate;
 
 use std::path::Path;
 use std::str::FromStr;
@@ -68,13 +59,47 @@ pub struct CoreDb {
 impl CoreDb {
     /// Open (or create) `core.db` inside `db_dir`.
     ///
-    /// Runs all migrations, then checks for legacy database files
-    /// (`session.db`, `cron.db`, `users.db`) and migrates their data
-    /// into the unified database if found.
+    /// Runs all migrations from `./migrations`. If migrations fail due to a
+    /// checksum mismatch or a removed migration (common during development
+    /// when migration files are edited in-place), the database is deleted
+    /// and recreated from scratch.
     pub async fn new(db_dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(db_dir)?;
 
         let db_path = db_dir.join("core.db");
+
+        // Try to open and migrate; on schema mismatch, recreate from scratch.
+        match Self::open_and_migrate(&db_path).await {
+            Ok(pool) => {
+                debug!("core.db ready at {}", db_path.display());
+                Ok(Self { pool })
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                let is_schema_mismatch = msg.contains("previously applied but is missing")
+                    || msg.contains("checksum mismatch");
+
+                if !is_schema_mismatch {
+                    return Err(e);
+                }
+
+                info!("Migration schema changed — recreating core.db");
+                // Remove db + WAL/SHM files
+                let db_str = db_path.display().to_string();
+                let _ = std::fs::remove_file(&db_path);
+                let _ = std::fs::remove_file(format!("{db_str}-wal"));
+                let _ = std::fs::remove_file(format!("{db_str}-shm"));
+
+                let pool = Self::open_and_migrate(&db_path).await?;
+                debug!("core.db recreated at {}", db_path.display());
+
+                Ok(Self { pool })
+            }
+        }
+    }
+
+    /// Open (or create) the database file and run migrations.
+    async fn open_and_migrate(db_path: &Path) -> Result<SqlitePool> {
         let opts = SqliteConnectOptions::from_str(
             &format!("sqlite://{}?mode=rwc", db_path.display()),
         )
@@ -93,15 +118,7 @@ impl CoreDb {
             .await
             .map_err(|e| StarpodError::Database(format!("Core migration failed: {}", e)))?;
 
-        debug!("core.db ready at {}", db_path.display());
-
-        // Migrate legacy databases if present
-        if migrate::has_legacy_dbs(db_dir) {
-            info!("Legacy database files detected — migrating to core.db");
-            migrate::migrate_legacy_dbs(&pool, db_dir).await?;
-        }
-
-        Ok(Self { pool })
+        Ok(pool)
     }
 
     /// Create an in-memory `CoreDb` for testing.

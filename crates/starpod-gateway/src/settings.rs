@@ -265,9 +265,15 @@ struct TelegramChannelSettings {
     bot_token: Option<String>,
 }
 
+/// Request body for `PUT /api/settings/auth/users/{id}/telegram`.
+///
+/// At least one of `telegram_id` or `username` must be provided. When only
+/// a username is given, the numeric ID is back-filled automatically when the
+/// user first messages the bot.
 #[derive(Debug, Deserialize)]
 struct LinkTelegramRequest {
-    telegram_id: i64,
+    #[serde(default)]
+    telegram_id: Option<i64>,
     #[serde(default)]
     username: Option<String>,
 }
@@ -1572,6 +1578,12 @@ async fn get_channels(
     }))
 }
 
+/// Save channel settings and hot-reload the Telegram bot.
+///
+/// Writes config fields (`enabled`, `gap_minutes`, `stream_mode`) to
+/// `agent.toml` and the bot token to the encrypted vault. After saving,
+/// reloads the in-memory config and calls [`AppState::restart_telegram`]
+/// so the bot starts, restarts, or stops without a server restart.
 async fn put_channels(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -1611,6 +1623,16 @@ async fn put_channels(
     if let Some(ref token) = settings.telegram.bot_token {
         write_vault_key(&state, "TELEGRAM_BOT_TOKEN", if token.is_empty() { None } else { Some(token) }).await?;
     }
+
+    // Hot-reload config so restart_telegram sees the updated enabled/stream_mode
+    if let Ok(agent_cfg) = reload_agent_config(&state.paths) {
+        let new_config = agent_cfg.into_starpod_config(&state.paths);
+        state.agent.reload_config(new_config.clone());
+        *state.config.write().unwrap() = new_config;
+    }
+
+    // (Re)start or stop the Telegram bot based on new config + token
+    state.restart_telegram().await;
 
     Ok(ok_json())
 }
@@ -1689,6 +1711,11 @@ async fn put_user_telegram(
 ) -> ApiResult<serde_json::Value> {
     let auth_user = authenticate_request(&state, &headers).await?;
     require_admin(&auth_user)?;
+
+    // Require at least one identifier
+    if req.telegram_id.is_none() && req.username.as_ref().map_or(true, |u| u.trim().is_empty()) {
+        return Err(err(StatusCode::BAD_REQUEST, "Provide a Telegram ID or username"));
+    }
 
     // Verify user exists
     state
@@ -1876,6 +1903,7 @@ mod tests {
             model_registry: Arc::new(agent_sdk::models::ModelRegistry::with_defaults()),
             events_tx,
             vault: None,
+            telegram_handle: tokio::sync::Mutex::new(None),
         });
 
         (tmp, state)
@@ -3057,6 +3085,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn telegram_link_username_only_via_api() {
+        let (_tmp, state) = test_app_state().await;
+        let admin = state.auth.create_user(None, Some("Admin"), starpod_auth::Role::Admin).await.unwrap();
+        let admin_key = state.auth.create_api_key(&admin.id, None).await.unwrap();
+        let key = &admin_key.key;
+        let user = state.auth.create_user(None, Some("Alice"), starpod_auth::Role::User).await.unwrap();
+        let uid = user.id.clone();
+
+        // PUT: link with username only (no telegram_id)
+        let (status, json) = put_json_authed(
+            Arc::clone(&state),
+            &format!("/api/settings/auth/users/{}/telegram", uid),
+            key,
+            serde_json::json!({ "username": "alice_tg" }),
+        ).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["telegram_id"].is_null(), "telegram_id should be null for username-only link");
+        assert_eq!(json["username"], "alice_tg");
+
+        // GET: link exists with username but no ID
+        let (status, json) = get_json_authed(state, &format!("/api/settings/auth/users/{}/telegram", uid), key).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["telegram_id"].is_null());
+        assert_eq!(json["username"], "alice_tg");
+    }
+
+    #[tokio::test]
+    async fn telegram_link_rejects_empty_body() {
+        let (_tmp, state) = test_app_state().await;
+        let admin = state.auth.create_user(None, Some("Admin"), starpod_auth::Role::Admin).await.unwrap();
+        let admin_key = state.auth.create_api_key(&admin.id, None).await.unwrap();
+        let key = &admin_key.key;
+        let user = state.auth.create_user(None, Some("Alice"), starpod_auth::Role::User).await.unwrap();
+        let uid = user.id.clone();
+
+        // PUT: neither telegram_id nor username → should fail
+        let (status, _) = put_json_authed(
+            state,
+            &format!("/api/settings/auth/users/{}/telegram", uid),
+            key,
+            serde_json::json!({}),
+        ).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn channels_settings_round_trip() {
         let settings = ChannelsSettings {
             telegram: TelegramChannelSettings {
@@ -3263,6 +3337,7 @@ mod tests {
             model_registry: Arc::clone(&state.model_registry),
             events_tx: state.events_tx.clone(),
             vault: Some(Arc::new(vault)),
+            telegram_handle: tokio::sync::Mutex::new(None),
         });
         (tmp, state)
     }

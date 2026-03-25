@@ -63,6 +63,52 @@ pub struct AppState {
     pub events_tx: tokio::sync::broadcast::Sender<GatewayEvent>,
     /// Encrypted credential vault for system keys (API keys, bot tokens).
     pub vault: Option<Arc<starpod_vault::Vault>>,
+    /// Handle to the running Telegram bot task (if any).
+    pub telegram_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+impl AppState {
+    /// (Re)start the Telegram bot, aborting any previously running instance.
+    ///
+    /// Reads the token from the `TELEGRAM_BOT_TOKEN` env var and the `enabled`
+    /// flag from the current config. If both are set, spawns a new bot task.
+    ///
+    /// Called in three situations:
+    /// 1. On gateway startup (initial boot).
+    /// 2. When the admin saves channel settings via the Settings UI.
+    /// 3. When the config file watcher detects a change to `[channels.telegram]`.
+    pub async fn restart_telegram(&self) {
+        // Abort existing bot task
+        let mut handle = self.telegram_handle.lock().await;
+        if let Some(h) = handle.take() {
+            h.abort();
+            info!("Telegram bot stopped");
+        }
+
+        let config = self.config.read().unwrap().clone();
+        let enabled = config.channels.telegram.as_ref().map_or(false, |t| t.enabled);
+        let token = config.resolved_telegram_token();
+
+        match (enabled, token) {
+            (true, Some(token)) => {
+                let agent = Arc::clone(&self.agent);
+                let auth = Arc::clone(&self.auth);
+                let h = tokio::spawn(async move {
+                    if let Err(e) = starpod_telegram::run_with_agent_and_auth(agent, auth, token).await {
+                        tracing::error!(error = %e, "Telegram bot error");
+                    }
+                });
+                info!("Telegram bot started");
+                *handle = Some(h);
+            }
+            (true, None) => {
+                warn!("Telegram channel enabled but TELEGRAM_BOT_TOKEN is not set");
+            }
+            (false, _) => {
+                debug!("Telegram channel disabled, bot not started");
+            }
+        }
+    }
 }
 
 /// Embedded web UI assets (built by Vite into static/dist/).
@@ -315,7 +361,11 @@ pub async fn serve_with_agent(
         model_registry: Arc::new(model_registry),
         events_tx,
         vault,
+        telegram_handle: tokio::sync::Mutex::new(None),
     });
+
+    // Start Telegram bot if configured
+    state.restart_telegram().await;
 
     // Start config file watcher in background
     let _watcher_handle = start_config_watcher(Arc::clone(&state), &config, &state.paths);
@@ -429,6 +479,9 @@ fn start_config_watcher(
 
     info!(dir = %watch_dir.display(), "Config hot reload enabled");
 
+    // Capture the tokio runtime handle for async operations from the watcher thread
+    let rt_handle = tokio::runtime::Handle::current();
+
     // Spawn a background thread (not async — notify uses std channels)
     std::thread::spawn(move || {
         for events in rx {
@@ -460,11 +513,24 @@ fn start_config_watcher(
                                     );
                                 }
 
+                                // Check if Telegram config changed
+                                let tg_changed = old_config.channels.telegram != new_config.channels.telegram;
+
                                 // Update the agent's config (affects next chat request)
                                 state.agent.reload_config(new_config.clone());
 
                                 // Update the gateway's config
                                 *state.config.write().unwrap() = new_config;
+
+                                // Restart Telegram bot if its config changed
+                                if tg_changed {
+                                    info!("Telegram config changed, restarting bot...");
+                                    let state = Arc::clone(&state);
+                                    let rt = rt_handle.clone();
+                                    rt.spawn(async move {
+                                        state.restart_telegram().await;
+                                    });
+                                }
                             }
                             Err(e) => {
                                 warn!(error = %e, "Failed to reload config (keeping previous config)");

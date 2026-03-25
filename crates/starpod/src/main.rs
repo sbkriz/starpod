@@ -1153,46 +1153,29 @@ async fn resolve_agent(
     Ok((agent, starpod_config, paths))
 }
 
-/// Set up telegram bot + cron notifier from config.
+/// Build the cron notification sender from config.
 ///
-/// Spawns the telegram bot task if configured, and returns the cron notifier sender.
-fn setup_telegram_and_notifier(
-    agent: &Arc<StarpodAgent>,
+/// The Telegram bot itself is managed by the gateway (started/restarted
+/// via `AppState::restart_telegram`).
+fn build_cron_notifier(
     config: &StarpodConfig,
-    auth: Option<Arc<starpod_auth::AuthStore>>,
 ) -> Option<starpod_cron::NotificationSender> {
     let telegram_token = config.resolved_telegram_token();
 
-    let cron_notifier: Option<starpod_cron::NotificationSender> =
-        if let Some(ref token) = telegram_token {
+    if let Some(ref token) = telegram_token {
+        let token = token.clone();
+        Some(Arc::new(move |_job_name, _session_id, result_text, _success| {
             let token = token.clone();
-            Some(Arc::new(move |_job_name, _session_id, result_text, _success| {
-                let token = token.clone();
-                Box::pin(async move {
-                    // Cron notifications go to all linked telegram users
-                    // For now, just log — full notification routing will be added later
-                    tracing::debug!("Cron notification: {}", &result_text[..result_text.len().min(100)]);
-                    let _ = token;
-                })
-            }))
-        } else {
-            None
-        };
-
-    if let Some(token) = telegram_token {
-        if let Some(auth) = auth {
-            let tg_agent = Arc::clone(agent);
-            tokio::spawn(async move {
-                if let Err(e) =
-                    starpod_telegram::run_with_agent_and_auth(tg_agent, auth, token).await
-                {
-                    tracing::error!(error = %e, "Telegram bot error");
-                }
-            });
-        }
+            Box::pin(async move {
+                // Cron notifications go to all linked telegram users
+                // For now, just log — full notification routing will be added later
+                tracing::debug!("Cron notification: {}", &result_text[..result_text.len().min(100)]);
+                let _ = token;
+            })
+        }))
+    } else {
+        None
     }
-
-    cron_notifier
 }
 
 // ── Sync diff display ──────────────────────────────────────────────────────
@@ -1790,11 +1773,11 @@ async fn main() -> anyhow::Result<()> {
             let display_name = config.agent_name.clone();
 
             let agent = Arc::new(StarpodAgent::with_paths(agent_config, paths.clone()).await?);
-            let cron_notifier = setup_telegram_and_notifier(&agent, &config, None);
 
-            // Bootstrap auth store early so we can auto-login in the browser
+            // Bootstrap auth store early so Telegram bot + browser auto-login work
             let auth_bootstrap = starpod_gateway::create_auth_store(&paths).await?;
             let auth_store = auth_bootstrap.store.clone();
+            let cron_notifier = build_cron_notifier(&config);
 
             print_header_with_name(&display_name);
             println!("  {} {} → {}", "DEV".bright_yellow().bold(), agent_name.bright_cyan(), instance_dir.display().to_string().dimmed());
@@ -1832,10 +1815,11 @@ async fn main() -> anyhow::Result<()> {
             let (agent, config, paths) = resolve_agent(agent_name).await?;
             let addr = config.server_addr.clone();
             let display_name = config.agent_name.clone();
-            let telegram_active = config.resolved_telegram_token().is_some();
+            let telegram_enabled = config.channels.telegram.as_ref().map_or(false, |t| t.enabled);
+            let telegram_active = telegram_enabled && config.resolved_telegram_token().is_some();
             let agent = Arc::new(agent);
             let auth = starpod_gateway::create_auth_store(&paths).await.ok().map(|b| b.store);
-            let cron_notifier = setup_telegram_and_notifier(&agent, &config, auth.clone());
+            let cron_notifier = build_cron_notifier(&config);
 
             // Print startup banner
             println!();

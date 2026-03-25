@@ -2,7 +2,7 @@
 //!
 //! This crate provides per-user API keys (argon2id-hashed), Telegram account
 //! linking, role-based access control (admin/user), in-memory rate limiting,
-//! and an audit log — all backed by a SQLite database (`users.db`).
+//! and an audit log — all backed by a shared SQLite database (`core.db`).
 //!
 //! ## Key concepts
 //!
@@ -372,19 +372,49 @@ impl AuthStore {
 
     /// Link a Telegram account to a user.
     ///
-    /// If the `telegram_id` is already linked to another user, the old link
-    /// is replaced (one Telegram account → one user).
+    /// Accepts either a `telegram_id`, a `username`, or both. At least one
+    /// must be provided. When only a username is given, the `telegram_id` is
+    /// back-filled automatically when the user first messages the bot (see
+    /// [`authenticate_telegram`](Self::authenticate_telegram)).
+    ///
+    /// Each user can have at most one Telegram link. Calling this method
+    /// replaces any existing link for the same `user_id`, `telegram_id`, or
+    /// `username` to maintain uniqueness across all three dimensions.
     pub async fn link_telegram(
         &self,
         user_id: &str,
-        telegram_id: i64,
+        telegram_id: Option<i64>,
         username: Option<&str>,
     ) -> Result<TelegramLink> {
         let now = Utc::now();
         let now_str = now.to_rfc3339();
 
+        // Remove any existing link for this user (one link per user)
+        sqlx::query("DELETE FROM telegram_links WHERE user_id = ?")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StarpodError::Auth(format!("Failed to clear old Telegram link: {}", e)))?;
+
+        // Also remove any existing link with the same telegram_id or username
+        // so the new link doesn't violate UNIQUE constraints
+        if let Some(tid) = telegram_id {
+            sqlx::query("DELETE FROM telegram_links WHERE telegram_id = ?")
+                .bind(tid)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| StarpodError::Auth(format!("Failed to clear old Telegram ID link: {}", e)))?;
+        }
+        if let Some(uname) = username {
+            sqlx::query("DELETE FROM telegram_links WHERE username = ?")
+                .bind(uname)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| StarpodError::Auth(format!("Failed to clear old username link: {}", e)))?;
+        }
+
         sqlx::query(
-            "INSERT OR REPLACE INTO telegram_links (telegram_id, user_id, username, linked_at) \
+            "INSERT INTO telegram_links (telegram_id, user_id, username, linked_at) \
              VALUES (?, ?, ?, ?)"
         )
         .bind(telegram_id)
@@ -395,7 +425,7 @@ impl AuthStore {
         .await
         .map_err(|e| StarpodError::Auth(format!("Failed to link Telegram: {}", e)))?;
 
-        debug!(user_id = %user_id, telegram_id = %telegram_id, "Telegram account linked");
+        debug!(user_id = %user_id, telegram_id = ?telegram_id, username = ?username, "Telegram account linked");
 
         Ok(TelegramLink {
             telegram_id,
@@ -403,6 +433,22 @@ impl AuthStore {
             username: username.map(String::from),
             linked_at: now,
         })
+    }
+
+    /// Back-fill the telegram_id on an existing username-only link.
+    ///
+    /// Called by the bot when a user with a matching username sends their
+    /// first message and the link was created without a numeric ID.
+    pub async fn backfill_telegram_id(&self, username: &str, telegram_id: i64) -> Result<()> {
+        sqlx::query(
+            "UPDATE telegram_links SET telegram_id = ? WHERE username = ? AND telegram_id IS NULL"
+        )
+        .bind(telegram_id)
+        .bind(username)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| StarpodError::Auth(format!("Failed to backfill Telegram ID: {}", e)))?;
+        Ok(())
     }
 
     /// Unlink a Telegram account.
@@ -415,11 +461,17 @@ impl AuthStore {
         Ok(())
     }
 
-    /// Authenticate a Telegram user by their numeric ID.
+    /// Authenticate a Telegram user by their numeric ID, falling back to username.
     ///
-    /// Returns the linked user if the Telegram ID is linked to an active user,
-    /// or `None` if unlinked or the user is deactivated.
-    pub async fn authenticate_telegram(&self, telegram_id: i64) -> Result<Option<User>> {
+    /// Resolution order:
+    /// 1. Look up by `telegram_id` (exact match).
+    /// 2. If no match and `username` is provided, look up by `username`.
+    /// 3. If matched by username and the link has no `telegram_id` yet, the
+    ///    numeric ID is back-filled so subsequent lookups succeed by ID alone.
+    ///
+    /// Returns `None` if the user is not linked or is deactivated.
+    pub async fn authenticate_telegram(&self, telegram_id: i64, username: Option<&str>) -> Result<Option<User>> {
+        // Try by ID first
         let row = sqlx::query(
             "SELECT u.id, u.email, u.display_name, u.role, u.is_active, u.filesystem_enabled, u.created_at, u.updated_at \
              FROM telegram_links tl JOIN users u ON tl.user_id = u.id \
@@ -430,7 +482,30 @@ impl AuthStore {
         .await
         .map_err(|e| StarpodError::Auth(format!("Telegram auth query failed: {}", e)))?;
 
-        Ok(row.map(|r| row_to_user(&r)))
+        if let Some(r) = row {
+            return Ok(Some(row_to_user(&r)));
+        }
+
+        // Fall back to username match (for username-only links)
+        if let Some(uname) = username {
+            let row = sqlx::query(
+                "SELECT u.id, u.email, u.display_name, u.role, u.is_active, u.filesystem_enabled, u.created_at, u.updated_at \
+                 FROM telegram_links tl JOIN users u ON tl.user_id = u.id \
+                 WHERE tl.username = ? AND u.is_active = 1"
+            )
+            .bind(uname)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StarpodError::Auth(format!("Telegram username auth query failed: {}", e)))?;
+
+            if let Some(r) = row {
+                // Back-fill the telegram_id now that we know it
+                self.backfill_telegram_id(uname, telegram_id).await?;
+                return Ok(Some(row_to_user(&r)));
+            }
+        }
+
+        Ok(None)
     }
 
     /// Get the Telegram link for a specific user.
@@ -739,16 +814,16 @@ mod tests {
     async fn telegram_link_and_auth() {
         let store = test_store().await;
         let user = store.create_user(None, None, Role::User).await.unwrap();
-        store.link_telegram(&user.id, 123456789, Some("alice")).await.unwrap();
+        store.link_telegram(&user.id, Some(123456789), Some("alice")).await.unwrap();
 
-        let authed = store.authenticate_telegram(123456789).await.unwrap().unwrap();
+        let authed = store.authenticate_telegram(123456789, None).await.unwrap().unwrap();
         assert_eq!(authed.id, user.id);
     }
 
     #[tokio::test]
     async fn telegram_unlinked_fails() {
         let store = test_store().await;
-        let result = store.authenticate_telegram(999999).await.unwrap();
+        let result = store.authenticate_telegram(999999, None).await.unwrap();
         assert!(result.is_none());
     }
 
@@ -756,19 +831,20 @@ mod tests {
     async fn telegram_unlink() {
         let store = test_store().await;
         let user = store.create_user(None, None, Role::User).await.unwrap();
-        store.link_telegram(&user.id, 123, None).await.unwrap();
+        store.link_telegram(&user.id, Some(123), None).await.unwrap();
         store.unlink_telegram(123).await.unwrap();
 
-        let result = store.authenticate_telegram(123).await.unwrap();
+        let result = store.authenticate_telegram(123, None).await.unwrap();
         assert!(result.is_none());
     }
 
     #[tokio::test]
     async fn list_telegram_links() {
         let store = test_store().await;
-        let user = store.create_user(None, None, Role::User).await.unwrap();
-        store.link_telegram(&user.id, 111, Some("alice")).await.unwrap();
-        store.link_telegram(&user.id, 222, Some("bob")).await.unwrap();
+        let alice = store.create_user(None, Some("Alice"), Role::User).await.unwrap();
+        let bob = store.create_user(None, Some("Bob"), Role::User).await.unwrap();
+        store.link_telegram(&alice.id, Some(111), Some("alice")).await.unwrap();
+        store.link_telegram(&bob.id, Some(222), Some("bob")).await.unwrap();
 
         let links = store.list_telegram_links().await.unwrap();
         assert_eq!(links.len(), 2);
@@ -914,13 +990,13 @@ mod tests {
         let bob = store.create_user(None, Some("Bob"), Role::User).await.unwrap();
 
         // Link to Alice
-        store.link_telegram(&alice.id, 999, None).await.unwrap();
-        let authed = store.authenticate_telegram(999).await.unwrap().unwrap();
+        store.link_telegram(&alice.id, Some(999), None).await.unwrap();
+        let authed = store.authenticate_telegram(999, None).await.unwrap().unwrap();
         assert_eq!(authed.id, alice.id);
 
         // Relink same telegram_id to Bob (INSERT OR REPLACE)
-        store.link_telegram(&bob.id, 999, None).await.unwrap();
-        let authed = store.authenticate_telegram(999).await.unwrap().unwrap();
+        store.link_telegram(&bob.id, Some(999), None).await.unwrap();
+        let authed = store.authenticate_telegram(999, None).await.unwrap().unwrap();
         assert_eq!(authed.id, bob.id, "Relink should point to the new user");
 
         // Should only be one link total
@@ -932,11 +1008,11 @@ mod tests {
     async fn deactivated_user_telegram_auth_fails() {
         let store = test_store().await;
         let user = store.create_user(None, None, Role::User).await.unwrap();
-        store.link_telegram(&user.id, 111, None).await.unwrap();
+        store.link_telegram(&user.id, Some(111), None).await.unwrap();
 
         store.deactivate_user(&user.id).await.unwrap();
 
-        let result = store.authenticate_telegram(111).await.unwrap();
+        let result = store.authenticate_telegram(111, None).await.unwrap();
         assert!(result.is_none(), "Deactivated user should not authenticate via Telegram");
     }
 
@@ -973,10 +1049,10 @@ mod tests {
     async fn get_telegram_link_for_user() {
         let store = test_store().await;
         let user = store.create_user(None, Some("Alice"), Role::User).await.unwrap();
-        store.link_telegram(&user.id, 12345, Some("alice")).await.unwrap();
+        store.link_telegram(&user.id, Some(12345), Some("alice")).await.unwrap();
 
         let link = store.get_telegram_link_for_user(&user.id).await.unwrap().unwrap();
-        assert_eq!(link.telegram_id, 12345);
+        assert_eq!(link.telegram_id, Some(12345));
         assert_eq!(link.username.as_deref(), Some("alice"));
     }
 
@@ -992,10 +1068,120 @@ mod tests {
     async fn unlink_telegram_by_user() {
         let store = test_store().await;
         let user = store.create_user(None, None, Role::User).await.unwrap();
-        store.link_telegram(&user.id, 999, None).await.unwrap();
+        store.link_telegram(&user.id, Some(999), None).await.unwrap();
 
         store.unlink_telegram_by_user(&user.id).await.unwrap();
-        let result = store.authenticate_telegram(999).await.unwrap();
+        let result = store.authenticate_telegram(999, None).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn telegram_link_username_only() {
+        let store = test_store().await;
+        let user = store.create_user(None, Some("Alice"), Role::User).await.unwrap();
+
+        // Link with username only (no telegram_id)
+        let link = store.link_telegram(&user.id, None, Some("alice")).await.unwrap();
+        assert_eq!(link.telegram_id, None);
+        assert_eq!(link.username.as_deref(), Some("alice"));
+
+        // Verify the link is retrievable
+        let found = store.get_telegram_link_for_user(&user.id).await.unwrap().unwrap();
+        assert_eq!(found.telegram_id, None);
+        assert_eq!(found.username.as_deref(), Some("alice"));
+    }
+
+    #[tokio::test]
+    async fn telegram_auth_by_username_with_backfill() {
+        let store = test_store().await;
+        let user = store.create_user(None, Some("Alice"), Role::User).await.unwrap();
+
+        // Link with username only
+        store.link_telegram(&user.id, None, Some("alice")).await.unwrap();
+
+        // Auth by ID alone should fail (no telegram_id stored)
+        let result = store.authenticate_telegram(42, None).await.unwrap();
+        assert!(result.is_none());
+
+        // Auth with matching username should succeed and backfill the ID
+        let authed = store.authenticate_telegram(42, Some("alice")).await.unwrap().unwrap();
+        assert_eq!(authed.id, user.id);
+
+        // After backfill, auth by ID alone should now work
+        let authed2 = store.authenticate_telegram(42, None).await.unwrap().unwrap();
+        assert_eq!(authed2.id, user.id);
+    }
+
+    #[tokio::test]
+    async fn telegram_auth_username_mismatch_fails() {
+        let store = test_store().await;
+        let user = store.create_user(None, None, Role::User).await.unwrap();
+
+        // Link with username only
+        store.link_telegram(&user.id, None, Some("alice")).await.unwrap();
+
+        // Auth with wrong username should fail
+        let result = store.authenticate_telegram(42, Some("bob")).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn telegram_link_replaces_same_user() {
+        let store = test_store().await;
+        let user = store.create_user(None, None, Role::User).await.unwrap();
+
+        // Link with ID
+        store.link_telegram(&user.id, Some(111), Some("old")).await.unwrap();
+        // Relink same user with different ID — old link removed
+        store.link_telegram(&user.id, Some(222), Some("new")).await.unwrap();
+
+        let result = store.authenticate_telegram(111, None).await.unwrap();
+        assert!(result.is_none(), "Old telegram_id should no longer work");
+
+        let authed = store.authenticate_telegram(222, None).await.unwrap().unwrap();
+        assert_eq!(authed.id, user.id);
+
+        // Only one link should exist
+        let links = store.list_telegram_links().await.unwrap();
+        assert_eq!(links.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn telegram_link_replaces_conflicting_username() {
+        let store = test_store().await;
+        let alice = store.create_user(None, Some("Alice"), Role::User).await.unwrap();
+        let bob = store.create_user(None, Some("Bob"), Role::User).await.unwrap();
+
+        // Alice links with username "shared"
+        store.link_telegram(&alice.id, None, Some("shared")).await.unwrap();
+        // Bob links with same username — Alice's link is removed
+        store.link_telegram(&bob.id, None, Some("shared")).await.unwrap();
+
+        let authed = store.authenticate_telegram(42, Some("shared")).await.unwrap().unwrap();
+        assert_eq!(authed.id, bob.id, "Username 'shared' should now point to Bob");
+
+        // Alice should have no link
+        let alice_link = store.get_telegram_link_for_user(&alice.id).await.unwrap();
+        assert!(alice_link.is_none());
+    }
+
+    #[tokio::test]
+    async fn telegram_backfill_does_not_overwrite_existing_id() {
+        let store = test_store().await;
+        let user = store.create_user(None, None, Role::User).await.unwrap();
+
+        // Link with both ID and username
+        store.link_telegram(&user.id, Some(100), Some("alice")).await.unwrap();
+
+        // Backfill should be a no-op (telegram_id IS NOT NULL)
+        store.backfill_telegram_id("alice", 999).await.unwrap();
+
+        // Original ID should still work
+        let authed = store.authenticate_telegram(100, None).await.unwrap().unwrap();
+        assert_eq!(authed.id, user.id);
+
+        // The "new" ID should NOT work (backfill only applies to NULL telegram_id)
+        let result = store.authenticate_telegram(999, None).await.unwrap();
         assert!(result.is_none());
     }
 
@@ -1130,9 +1316,9 @@ mod tests {
         let store = test_store().await;
         let user = store.create_user(None, None, Role::User).await.unwrap();
         store.update_user(&user.id, None, None, None, Some(true)).await.unwrap();
-        store.link_telegram(&user.id, 12345, None).await.unwrap();
+        store.link_telegram(&user.id, Some(12345), None).await.unwrap();
 
-        let authed = store.authenticate_telegram(12345).await.unwrap().unwrap();
+        let authed = store.authenticate_telegram(12345, None).await.unwrap().unwrap();
         assert!(authed.filesystem_enabled);
     }
 

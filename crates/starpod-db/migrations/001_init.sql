@@ -27,13 +27,15 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(prefix);
 CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
 
 CREATE TABLE IF NOT EXISTS telegram_links (
-    telegram_id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id INTEGER UNIQUE,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     username TEXT,
     linked_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_telegram_links_user_id ON telegram_links(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_telegram_links_username ON telegram_links(username) WHERE username IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS auth_audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

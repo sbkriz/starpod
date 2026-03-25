@@ -447,6 +447,7 @@ mod tests {
             model_registry: Arc::new(agent_sdk::models::ModelRegistry::with_defaults()),
             events_tx,
             vault: None,
+            telegram_handle: tokio::sync::Mutex::new(None),
         });
 
         (tmp, state)

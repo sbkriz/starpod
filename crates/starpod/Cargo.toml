@@ -20,7 +20,6 @@ agent-sdk = { workspace = true }
 starpod-core = { workspace = true }
 starpod-agent = { workspace = true }
 starpod-gateway = { workspace = true }
-starpod-telegram = { workspace = true }
 starpod-skills = { workspace = true }
 starpod-cron = { workspace = true }
 starpod-instances = { workspace = true }

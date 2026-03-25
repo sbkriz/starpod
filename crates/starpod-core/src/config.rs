@@ -124,7 +124,7 @@ pub struct ProvidersConfig {
 /// Telegram user access is now controlled via the `starpod-auth` crate
 /// (database-backed user management with Telegram account linking),
 /// not via config-file allow-lists.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TelegramChannelConfig {
     /// Whether this channel is enabled (default: false).

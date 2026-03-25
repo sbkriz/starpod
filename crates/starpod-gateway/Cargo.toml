@@ -20,6 +20,7 @@ starpod-db = { workspace = true }
 starpod-memory = { workspace = true }
 starpod-skills = { workspace = true }
 starpod-vault = { workspace = true }
+starpod-telegram = { workspace = true }
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }

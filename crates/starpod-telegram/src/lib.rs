@@ -26,8 +26,12 @@ struct AgentName(String);
 /// Run the Telegram bot with a pre-built agent and auth store.
 ///
 /// Telegram users must be linked to a database user via `AuthStore::link_telegram`.
+/// Links can be created with a numeric Telegram ID, a `@username`, or both.
+/// When a username-only link exists, the bot automatically back-fills the
+/// numeric ID on first message via [`AuthStore::authenticate_telegram`].
+///
 /// Unlinked users get a "not linked" message. `/start` always works and shows
-/// the user's Telegram ID for linking.
+/// the user's Telegram ID and username for linking.
 pub async fn run_with_agent_and_auth(
     agent: Arc<StarpodAgent>,
     auth: Arc<AuthStore>,
@@ -221,7 +225,7 @@ async fn handle_message(
         return Ok(());
     };
 
-    let auth_user = match auth.authenticate_telegram(tg_id).await {
+    let auth_user = match auth.authenticate_telegram(tg_id, username.as_deref()).await {
         Ok(Some(user)) => user,
         Ok(None) => {
             debug!(

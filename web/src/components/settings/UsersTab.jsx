@@ -186,11 +186,16 @@ export default function UsersTab() {
 
   const linkTelegram = async () => {
     setTelegramError(null)
-    const tid = parseInt(newTelegramId, 10)
-    if (!tid || isNaN(tid)) { setTelegramError('Invalid Telegram ID'); return }
+    const raw = newTelegramId.trim()
+    if (!raw) { setTelegramError('Enter a Telegram ID or @username'); return }
     try {
-      const body = { telegram_id: tid }
-      if (newTelegramUsername.trim()) body.username = newTelegramUsername.trim()
+      const body = {}
+      // Pure digits → numeric Telegram ID; otherwise treat as username
+      if (/^\d+$/.test(raw)) {
+        body.telegram_id = parseInt(raw, 10)
+      } else {
+        body.username = raw.replace(/^@/, '')
+      }
       const r = await fetch(`/api/settings/auth/users/${encodeURIComponent(expandedId)}/telegram`, {
         method: 'PUT', headers: apiHeaders(), body: JSON.stringify(body),
       })
@@ -462,8 +467,9 @@ export default function UsersTab() {
                       ) : telegramLink ? (
                         <div className="flex items-center justify-between py-1.5 px-2 rounded-none bg-elevated/50">
                           <div className="flex items-center gap-2">
-                            <code className="text-xs font-mono text-primary">{telegramLink.telegram_id}</code>
+                            {telegramLink.telegram_id && <code className="text-xs font-mono text-primary">{telegramLink.telegram_id}</code>}
                             {telegramLink.username && <span className="text-xs text-secondary">@{telegramLink.username}</span>}
+                            {!telegramLink.telegram_id && !telegramLink.username && <span className="text-xs text-dim">linked</span>}
                           </div>
                           <button
                             onClick={unlinkTelegram}
@@ -475,18 +481,11 @@ export default function UsersTab() {
                       ) : (
                         <div className="flex gap-2">
                           <input
-                            type="number"
+                            type="text"
                             className="s-input font-mono text-xs flex-1"
                             value={newTelegramId}
                             onChange={e => setNewTelegramId(e.target.value)}
-                            placeholder="Telegram ID"
-                          />
-                          <input
-                            type="text"
-                            className="s-input text-xs flex-1"
-                            value={newTelegramUsername}
-                            onChange={e => setNewTelegramUsername(e.target.value)}
-                            placeholder="Username (optional)"
+                            placeholder="Telegram ID or @username"
                           />
                           <button onClick={linkTelegram} className="s-save-btn text-xs whitespace-nowrap">
                             Link

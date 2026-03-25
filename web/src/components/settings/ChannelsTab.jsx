@@ -52,7 +52,7 @@ export default function ChannelsTab() {
                   { text: <>BotFather will reply with a token — copy it</> },
                   { text: 'Paste the token in the field above' },
                 ]}
-                note="A restart is required after changing the token."
+                note="The bot will start automatically after saving."
               />
             )}
             <Row label="Session gap" sub="minutes of inactivity before new session">
