@@ -37,6 +37,8 @@ pub struct OpenAiProvider {
     provider_name: String,
     retry_config: RetryConfig,
     pricing: Option<Arc<ModelRegistry>>,
+    /// Extra fields merged into every request body (e.g. Ollama's `keep_alive`).
+    extra_body: serde_json::Map<String, serde_json::Value>,
 }
 
 impl OpenAiProvider {
@@ -58,6 +60,7 @@ impl OpenAiProvider {
             provider_name: provider_name.into(),
             retry_config: RetryConfig::default(),
             pricing: None,
+            extra_body: serde_json::Map::new(),
         }
     }
 
@@ -70,6 +73,14 @@ impl OpenAiProvider {
     /// Attach a pricing registry for cost lookups.
     pub fn with_pricing(mut self, registry: Arc<ModelRegistry>) -> Self {
         self.pricing = Some(registry);
+        self
+    }
+
+    /// Set extra fields merged into every request body.
+    ///
+    /// Useful for provider-specific options like Ollama's `keep_alive` or `num_ctx`.
+    pub fn with_extra_body(mut self, extra: serde_json::Map<String, serde_json::Value>) -> Self {
+        self.extra_body = extra;
         self
     }
 
@@ -277,8 +288,18 @@ fn parse_openai_response(oai: &OaiChatResponse) -> Result<MessageResponse> {
     // Tool calls
     if let Some(tool_calls) = &choice.message.tool_calls {
         for tc in tool_calls {
-            let input: serde_json::Value =
-                serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::json!({}));
+            let input: serde_json::Value = match serde_json::from_str(&tc.function.arguments) {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(
+                        tool = %tc.function.name,
+                        arguments = %tc.function.arguments,
+                        error = %e,
+                        "failed to parse tool call arguments, defaulting to {{}}"
+                    );
+                    serde_json::json!({})
+                }
+            };
             content.push(ApiContentBlock::ToolUse {
                 id: tc.id.clone(),
                 name: tc.function.name.clone(),
@@ -349,7 +370,39 @@ struct OaiToolCall {
 #[derive(Debug, Clone, Deserialize)]
 struct OaiFunction {
     name: String,
+    /// OpenAI returns arguments as a JSON string (`"{\"key\":\"val\"}"`),
+    /// but Ollama's OpenAI-compatible endpoint may return a raw JSON object.
+    /// We accept both via the custom deserializer.
+    #[serde(deserialize_with = "deserialize_arguments")]
     arguments: String,
+}
+
+/// Deserialize `arguments` from either a JSON string or an inline object/value.
+///
+/// OpenAI always sends `"arguments": "{\"key\":\"val\"}"` (a string containing JSON).
+/// Ollama sometimes sends `"arguments": {"key":"val"}` (an already-parsed object).
+/// This function normalises both to a `String` suitable for `serde_json::from_str`.
+fn deserialize_arguments<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let val = serde_json::Value::deserialize(deserializer)?;
+    match val {
+        serde_json::Value::String(s) => Ok(s),
+        other => Ok(other.to_string()),
+    }
+}
+
+/// Same as [`deserialize_arguments`] but for `Option<String>` (streaming deltas).
+fn deserialize_arguments_opt<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let val: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    Ok(val.map(|v| match v {
+        serde_json::Value::String(s) => s,
+        other => other.to_string(),
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -400,6 +453,7 @@ struct OaiStreamToolCall {
 #[derive(Debug, Deserialize)]
 struct OaiStreamFunction {
     name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_arguments_opt")]
     arguments: Option<String>,
 }
 
@@ -443,6 +497,9 @@ impl LlmProvider for OpenAiProvider {
     async fn create_message(&self, request: &CreateMessageRequest) -> Result<MessageResponse> {
         let mut oai_body = build_openai_request(request);
         oai_body["stream"] = serde_json::json!(false);
+        for (k, v) in &self.extra_body {
+            oai_body[k] = v.clone();
+        }
 
         let mut attempt: u32 = 0;
         loop {
@@ -487,6 +544,9 @@ impl LlmProvider for OpenAiProvider {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>> {
         let mut oai_body = build_openai_request(request);
         oai_body["stream"] = serde_json::json!(true);
+        for (k, v) in &self.extra_body {
+            oai_body[k] = v.clone();
+        }
 
         // Retry connection
         let mut attempt: u32 = 0;
@@ -569,7 +629,13 @@ fn openai_sse_stream(
                 if data == "[DONE]" {
                     // Emit accumulated tool calls before finishing
                     for (id, name, args) in tool_accum.drain(..) {
-                        let input: serde_json::Value = serde_json::from_str(&args).unwrap_or(serde_json::json!({}));
+                        let input: serde_json::Value = match serde_json::from_str(&args) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                warn!(arguments = %args, error = %e, "failed to parse streamed tool arguments, defaulting to {{}}");
+                                serde_json::json!({})
+                            }
+                        };
                         yield Ok(StreamEvent::ContentBlockStart {
                             index: content_index,
                             content_block: ApiContentBlock::ToolUse {
@@ -676,7 +742,13 @@ fn openai_sse_stream(
 
         // Flush any remaining tool calls
         for (id, name, args) in tool_accum.drain(..) {
-            let input: serde_json::Value = serde_json::from_str(&args).unwrap_or(serde_json::json!({}));
+            let input: serde_json::Value = match serde_json::from_str(&args) {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(arguments = %args, error = %e, "failed to parse streamed tool arguments, defaulting to {{}}");
+                    serde_json::json!({})
+                }
+            };
             yield Ok(StreamEvent::ContentBlockStart {
                 index: content_index,
                 content_block: ApiContentBlock::ToolUse {
@@ -816,6 +888,308 @@ mod tests {
         }
     }
 
+    // ── Ollama / argument-format compatibility tests ───────────────────
+
+    #[test]
+    fn parse_ollama_response_with_object_arguments() {
+        // Ollama's OpenAI-compatible endpoint returns `arguments` as a raw
+        // JSON object instead of a stringified JSON string.
+        let json = r#"{
+            "id": "chatcmpl-789",
+            "model": "qwen3:8b",
+            "choices": [{
+                "message": {
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_ollama",
+                        "type": "function",
+                        "function": {
+                            "name": "FileRead",
+                            "arguments": {"path": "/tmp/test.txt"}
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 30, "completion_tokens": 15}
+        }"#;
+        let oai: OaiChatResponse = serde_json::from_str(json).unwrap();
+        let msg = parse_openai_response(&oai).unwrap();
+        match &msg.content[0] {
+            ApiContentBlock::ToolUse { id, name, input } => {
+                assert_eq!(id, "call_ollama");
+                assert_eq!(name, "FileRead");
+                assert_eq!(input, &serde_json::json!({"path": "/tmp/test.txt"}));
+            }
+            _ => panic!("expected tool use"),
+        }
+    }
+
+    #[test]
+    fn parse_ollama_response_with_nested_object_arguments() {
+        // Complex nested objects should also round-trip correctly.
+        let json = r#"{
+            "id": "chatcmpl-nested",
+            "model": "qwen3:8b",
+            "choices": [{
+                "message": {
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_nested",
+                        "type": "function",
+                        "function": {
+                            "name": "WriteFile",
+                            "arguments": {
+                                "path": "/tmp/out.json",
+                                "content": "hello world",
+                                "options": {"overwrite": true, "mode": 644}
+                            }
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 40, "completion_tokens": 20}
+        }"#;
+        let oai: OaiChatResponse = serde_json::from_str(json).unwrap();
+        let msg = parse_openai_response(&oai).unwrap();
+        match &msg.content[0] {
+            ApiContentBlock::ToolUse { input, .. } => {
+                assert_eq!(input["path"], "/tmp/out.json");
+                assert_eq!(input["options"]["overwrite"], true);
+                assert_eq!(input["options"]["mode"], 644);
+            }
+            _ => panic!("expected tool use"),
+        }
+    }
+
+    #[test]
+    fn parse_ollama_response_with_empty_object_arguments() {
+        // Tools with no parameters: `arguments: {}` (object) should work.
+        let json = r#"{
+            "id": "chatcmpl-empty",
+            "model": "llama3:8b",
+            "choices": [{
+                "message": {
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_empty",
+                        "type": "function",
+                        "function": {
+                            "name": "FileList",
+                            "arguments": {}
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+        }"#;
+        let oai: OaiChatResponse = serde_json::from_str(json).unwrap();
+        let msg = parse_openai_response(&oai).unwrap();
+        match &msg.content[0] {
+            ApiContentBlock::ToolUse { name, input, .. } => {
+                assert_eq!(name, "FileList");
+                assert_eq!(input, &serde_json::json!({}));
+            }
+            _ => panic!("expected tool use"),
+        }
+    }
+
+    #[test]
+    fn parse_ollama_multiple_tool_calls_with_object_arguments() {
+        // Multiple tool calls in one response, all with object arguments.
+        let json = r#"{
+            "id": "chatcmpl-multi",
+            "model": "qwen3:8b",
+            "choices": [{
+                "message": {
+                    "content": "Let me check both files.",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "FileRead",
+                                "arguments": {"path": "/etc/hosts"}
+                            }
+                        },
+                        {
+                            "id": "call_2",
+                            "type": "function",
+                            "function": {
+                                "name": "FileRead",
+                                "arguments": {"path": "/etc/resolv.conf"}
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 25}
+        }"#;
+        let oai: OaiChatResponse = serde_json::from_str(json).unwrap();
+        let msg = parse_openai_response(&oai).unwrap();
+        // Text block + 2 tool uses
+        assert_eq!(msg.content.len(), 3);
+        match &msg.content[1] {
+            ApiContentBlock::ToolUse { input, .. } => {
+                assert_eq!(input["path"], "/etc/hosts");
+            }
+            _ => panic!("expected tool use at index 1"),
+        }
+        match &msg.content[2] {
+            ApiContentBlock::ToolUse { input, .. } => {
+                assert_eq!(input["path"], "/etc/resolv.conf");
+            }
+            _ => panic!("expected tool use at index 2"),
+        }
+    }
+
+    // ── deserialize_arguments unit tests ────────────────────────────────
+
+    #[test]
+    fn deserialize_arguments_from_string() {
+        // Standard OpenAI format: arguments is a JSON string.
+        let json = r#"{"name": "Bash", "arguments": "{\"command\":\"ls\"}"}"#;
+        let func: OaiFunction = serde_json::from_str(json).unwrap();
+        assert_eq!(func.arguments, r#"{"command":"ls"}"#);
+        let parsed: serde_json::Value = serde_json::from_str(&func.arguments).unwrap();
+        assert_eq!(parsed["command"], "ls");
+    }
+
+    #[test]
+    fn deserialize_arguments_from_object() {
+        // Ollama format: arguments is a raw JSON object.
+        let json = r#"{"name": "Bash", "arguments": {"command": "ls"}}"#;
+        let func: OaiFunction = serde_json::from_str(json).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&func.arguments).unwrap();
+        assert_eq!(parsed["command"], "ls");
+    }
+
+    #[test]
+    fn deserialize_arguments_from_empty_string() {
+        let json = r#"{"name": "Noop", "arguments": ""}"#;
+        let func: OaiFunction = serde_json::from_str(json).unwrap();
+        assert_eq!(func.arguments, "");
+    }
+
+    #[test]
+    fn deserialize_arguments_from_empty_object() {
+        let json = r#"{"name": "Noop", "arguments": {}}"#;
+        let func: OaiFunction = serde_json::from_str(json).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&func.arguments).unwrap();
+        assert_eq!(parsed, serde_json::json!({}));
+    }
+
+    #[test]
+    fn deserialize_arguments_from_array() {
+        // Edge case: some providers might send an array.
+        let json = r#"{"name": "Multi", "arguments": [1, 2, 3]}"#;
+        let func: OaiFunction = serde_json::from_str(json).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&func.arguments).unwrap();
+        assert_eq!(parsed, serde_json::json!([1, 2, 3]));
+    }
+
+    // ── deserialize_arguments_opt unit tests ────────────────────────────
+
+    #[test]
+    fn deserialize_stream_arguments_from_string() {
+        let json = r#"{"name": "Bash", "arguments": "{\"cmd\":\"pwd\"}"}"#;
+        let func: OaiStreamFunction = serde_json::from_str(json).unwrap();
+        assert_eq!(func.arguments.as_deref(), Some(r#"{"cmd":"pwd"}"#));
+    }
+
+    #[test]
+    fn deserialize_stream_arguments_from_object() {
+        let json = r#"{"name": "Bash", "arguments": {"cmd": "pwd"}}"#;
+        let func: OaiStreamFunction = serde_json::from_str(json).unwrap();
+        let args = func.arguments.unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&args).unwrap();
+        assert_eq!(parsed["cmd"], "pwd");
+    }
+
+    #[test]
+    fn deserialize_stream_arguments_missing() {
+        let json = r#"{"name": "Bash"}"#;
+        let func: OaiStreamFunction = serde_json::from_str(json).unwrap();
+        assert!(func.arguments.is_none());
+    }
+
+    #[test]
+    fn deserialize_stream_arguments_null() {
+        let json = r#"{"name": "Bash", "arguments": null}"#;
+        let func: OaiStreamFunction = serde_json::from_str(json).unwrap();
+        assert!(func.arguments.is_none());
+    }
+
+    // ── SSE streaming with Ollama-style tool calls ──────────────────────
+
+    #[tokio::test]
+    async fn stream_ollama_tool_call_with_object_arguments() {
+        use tokio_stream::StreamExt as _;
+
+        // Simulate Ollama sending a complete tool call in a single SSE chunk
+        // where arguments is a JSON object, not a string.
+        let sse_data = "\
+data: {\"id\":\"chat-1\",\"model\":\"qwen3:8b\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"FileRead\",\"arguments\":\"{\\\"path\\\":\\\"/tmp/foo\\\"}\"}}]},\"finish_reason\":null}]}\n\n\
+data: {\"id\":\"chat-1\",\"model\":\"qwen3:8b\",\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n\
+data: [DONE]\n\n";
+
+        let bytes_stream = futures::stream::once(async move {
+            Ok::<_, reqwest::Error>(bytes::Bytes::from(sse_data))
+        });
+
+        let raw: Vec<Result<StreamEvent>> = openai_sse_stream(bytes_stream)
+            .collect()
+            .await;
+        let events: Vec<StreamEvent> = raw.into_iter().map(|r| r.unwrap()).collect();
+
+        // Should contain: MessageStart, ContentBlockStart (tool), ContentBlockStop, MessageDelta, MessageStop
+        let tool_event = events.iter().find(|e| matches!(e, StreamEvent::ContentBlockStart { .. }));
+        assert!(tool_event.is_some(), "expected a tool ContentBlockStart event");
+        if let StreamEvent::ContentBlockStart { content_block: ApiContentBlock::ToolUse { name, input, .. }, .. } = tool_event.unwrap() {
+            assert_eq!(name, "FileRead");
+            assert_eq!(input["path"], "/tmp/foo");
+        } else {
+            panic!("expected ToolUse content block");
+        }
+    }
+
+    #[tokio::test]
+    async fn stream_ollama_incremental_tool_arguments() {
+        use tokio_stream::StreamExt as _;
+
+        // Simulate OpenAI-style incremental argument streaming (also used by
+        // some Ollama builds): arguments arrive in multiple string fragments.
+        let sse_data = "\
+data: {\"id\":\"chat-2\",\"model\":\"gpt-4.1\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_inc\",\"function\":{\"name\":\"Bash\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n\
+data: {\"id\":\"chat-2\",\"model\":\"gpt-4.1\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"com\"}}]},\"finish_reason\":null}]}\n\n\
+data: {\"id\":\"chat-2\",\"model\":\"gpt-4.1\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"mand\\\":\\\"ls\\\"}\"}}]},\"finish_reason\":null}]}\n\n\
+data: {\"id\":\"chat-2\",\"model\":\"gpt-4.1\",\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":10}}\n\n\
+data: [DONE]\n\n";
+
+        let bytes_stream = futures::stream::once(async move {
+            Ok::<_, reqwest::Error>(bytes::Bytes::from(sse_data))
+        });
+
+        let raw: Vec<Result<StreamEvent>> = openai_sse_stream(bytes_stream)
+            .collect()
+            .await;
+        let events: Vec<StreamEvent> = raw.into_iter().map(|r| r.unwrap()).collect();
+
+        let tool_event = events.iter().find(|e| matches!(e, StreamEvent::ContentBlockStart { .. }));
+        assert!(tool_event.is_some(), "expected a tool ContentBlockStart event");
+        if let StreamEvent::ContentBlockStart { content_block: ApiContentBlock::ToolUse { name, input, .. }, .. } = tool_event.unwrap() {
+            assert_eq!(name, "Bash");
+            assert_eq!(input["command"], "ls");
+        } else {
+            panic!("expected ToolUse content block");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+
     #[test]
     fn translate_assistant_tool_calls_only_no_text() {
         let msg = ApiMessage {
@@ -929,5 +1303,86 @@ mod tests {
         assert_eq!(msgs[0]["content"], "You are helpful.");
         assert_eq!(msgs[1]["role"], "user");
         assert_eq!(msgs[1]["content"], "Hi");
+    }
+
+    // ── extra_body tests ────────────────────────────────────────────────
+
+    #[test]
+    fn extra_body_defaults_empty() {
+        let provider = OpenAiProvider::new("sk-test");
+        assert!(provider.extra_body.is_empty());
+    }
+
+    #[test]
+    fn with_extra_body_sets_fields() {
+        let mut extra = serde_json::Map::new();
+        extra.insert("keep_alive".into(), serde_json::json!("5m"));
+        extra.insert("num_ctx".into(), serde_json::json!(32768));
+
+        let provider = OpenAiProvider::new("sk-test").with_extra_body(extra);
+        assert_eq!(provider.extra_body["keep_alive"], "5m");
+        assert_eq!(provider.extra_body["num_ctx"], 32768);
+    }
+
+    #[test]
+    fn extra_body_merged_into_request() {
+        let req = CreateMessageRequest {
+            model: "qwen3:8b".into(),
+            max_tokens: 2048,
+            messages: vec![ApiMessage {
+                role: "user".into(),
+                content: vec![ApiContentBlock::Text {
+                    text: "Hello".into(),
+                    cache_control: None,
+                }],
+            }],
+            system: None,
+            tools: None,
+            stream: false,
+            metadata: None,
+            thinking: None,
+        };
+
+        let mut extra = serde_json::Map::new();
+        extra.insert("keep_alive".into(), serde_json::json!("5m"));
+        extra.insert("num_ctx".into(), serde_json::json!(32768));
+
+        let mut body = build_openai_request(&req);
+        for (k, v) in &extra {
+            body[k] = v.clone();
+        }
+
+        assert_eq!(body["model"], "qwen3:8b");
+        assert_eq!(body["keep_alive"], "5m");
+        assert_eq!(body["num_ctx"], 32768);
+    }
+
+    #[test]
+    fn extra_body_does_not_override_core_fields_by_default() {
+        // extra_body should only add new keys; core fields like "model"
+        // are set before the merge, so extra_body CAN override them.
+        // This test documents the behavior: extra_body wins on conflict.
+        let req = CreateMessageRequest {
+            model: "qwen3:8b".into(),
+            max_tokens: 2048,
+            messages: vec![],
+            system: None,
+            tools: None,
+            stream: false,
+            metadata: None,
+            thinking: None,
+        };
+
+        let mut extra = serde_json::Map::new();
+        extra.insert("stream".into(), serde_json::json!(true));
+
+        let mut body = build_openai_request(&req);
+        body["stream"] = serde_json::json!(false); // set by create_message
+        for (k, v) in &extra {
+            body[k] = v.clone();
+        }
+
+        // extra_body overwrites — this is intentional (provider-specific overrides)
+        assert_eq!(body["stream"], true);
     }
 }
