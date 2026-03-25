@@ -939,7 +939,7 @@ pub async fn handle_custom_tool(
                 Ok(value) => {
                     // Audit the read if vault is available
                     if let Some(ref vault) = ctx.vault {
-                        let _ = vault.log_env_read(key).await;
+                        let _ = vault.log_env_read(key, ctx.user_id.as_deref()).await;
                     }
                     Some(ToolResult {
                         content: value,

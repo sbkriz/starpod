@@ -8,16 +8,16 @@ AES-256-GCM encrypted credential storage in SQLite with audit logging.
 let vault = Vault::new(&db_path, &master_key).await?;
 
 // Store a credential
-vault.set("github_token", "ghp_xxx").await?;
+vault.set("github_token", "ghp_xxx", Some("user_123")).await?;
 
 // Retrieve (decrypted)
-let value = vault.get("github_token").await?; // Option<String>
+let value = vault.get("github_token", Some("user_123")).await?; // Option<String>
 
 // List all keys
 let keys = vault.list_keys().await?; // Vec<String>
 
 // Delete
-vault.delete("github_token").await?;
+vault.delete("github_token", None).await?;
 ```
 
 ## System Keys
@@ -41,7 +41,7 @@ these values at runtime.
 - **Algorithm**: AES-256-GCM
 - **Master key**: 32-byte array (derived from API key in production)
 - **Storage**: SQLite database
-- **Audit**: All get/set/delete operations are logged
+- **Audit**: All get/set/delete operations are logged with optional `user_id`
 
 ## Tests
 

@@ -193,7 +193,7 @@ pub async fn populate_vault(
     let mut secrets_count = 0;
     for (key, _entry) in &all_secrets {
         if let Some(value) = env_map.get(*key) {
-            vault.set(key, value).await?;
+            vault.set(key, value, None).await?;
             secrets_count += 1;
         }
     }
@@ -218,10 +218,10 @@ pub async fn populate_vault(
     for (key, entry) in &all_variables {
         // .env value takes precedence over deploy.toml default
         if let Some(value) = env_map.get(*key) {
-            vault.set(key, value).await?;
+            vault.set(key, value, None).await?;
             variables_count += 1;
         } else if let Some(ref default) = entry.default {
-            vault.set(key, default).await?;
+            vault.set(key, default, None).await?;
             variables_count += 1;
         }
         // No .env value and no default → skip silently
@@ -274,7 +274,7 @@ pub async fn inject_env_from_vault(
     }
 
     for key in all_keys {
-        match vault.get(key).await? {
+        match vault.get(key, None).await? {
             Some(value) => {
                 // SAFETY: set_var is unsafe in Rust 2024 edition but we're
                 // calling it before any multithreaded work starts.
@@ -351,8 +351,8 @@ description = "GitHub PAT"
 
         let result = populate_vault(&deploy_path, Some(&env_path), &vault).await.unwrap();
         assert_eq!(result.secrets_count, 2);
-        assert_eq!(vault.get("ANTHROPIC_API_KEY").await.unwrap().as_deref(), Some("sk-ant-xxx"));
-        assert_eq!(vault.get("GITHUB_TOKEN").await.unwrap().as_deref(), Some("ghp_yyy"));
+        assert_eq!(vault.get("ANTHROPIC_API_KEY", None).await.unwrap().as_deref(), Some("sk-ant-xxx"));
+        assert_eq!(vault.get("GITHUB_TOKEN", None).await.unwrap().as_deref(), Some("ghp_yyy"));
     }
 
     #[tokio::test]
@@ -419,7 +419,7 @@ description = "Default city"
         let result = populate_vault(&deploy_path, Some(&env_path), &vault).await.unwrap();
         assert_eq!(result.variables_count, 1);
         // .env wins over default
-        assert_eq!(vault.get("CITY").await.unwrap().as_deref(), Some("Milan"));
+        assert_eq!(vault.get("CITY", None).await.unwrap().as_deref(), Some("Milan"));
     }
 
     #[tokio::test]
@@ -438,7 +438,7 @@ description = "Default city"
 
         let result = populate_vault(&deploy_path, Some(&env_path), &vault).await.unwrap();
         assert_eq!(result.variables_count, 1);
-        assert_eq!(vault.get("CITY").await.unwrap().as_deref(), Some("Rome"));
+        assert_eq!(vault.get("CITY", None).await.unwrap().as_deref(), Some("Rome"));
     }
 
     #[tokio::test]
@@ -455,7 +455,7 @@ description = "Cloud region"
 
         let result = populate_vault(&deploy_path, None, &vault).await.unwrap();
         assert_eq!(result.variables_count, 0);
-        assert!(vault.get("REGION").await.unwrap().is_none());
+        assert!(vault.get("REGION", None).await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -464,8 +464,8 @@ description = "Cloud region"
         let vault = test_vault(&tmp).await;
 
         // Pre-populate vault
-        vault.set("MY_SECRET", "secret_value").await.unwrap();
-        vault.set("MY_VAR", "var_value").await.unwrap();
+        vault.set("MY_SECRET", "secret_value", None).await.unwrap();
+        vault.set("MY_VAR", "var_value", None).await.unwrap();
 
         let deploy_path = write_deploy_toml(tmp.path(), r#"
 version = 1
@@ -540,7 +540,7 @@ description = "Shared token (skill-b)"
         let result = populate_vault(&deploy_path, Some(&env_path), &vault).await.unwrap();
         // Should only be counted once despite appearing in two skills
         assert_eq!(result.secrets_count, 1);
-        assert_eq!(vault.get("SHARED_TOKEN").await.unwrap().as_deref(), Some("shared_value"));
+        assert_eq!(vault.get("SHARED_TOKEN", None).await.unwrap().as_deref(), Some("shared_value"));
     }
 
     #[tokio::test]

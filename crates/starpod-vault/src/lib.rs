@@ -105,7 +105,7 @@ impl Vault {
     }
 
     /// Retrieve and decrypt a value by key. Returns `None` if the key doesn't exist.
-    pub async fn get(&self, key: &str) -> Result<Option<String>> {
+    pub async fn get(&self, key: &str, user_id: Option<&str>) -> Result<Option<String>> {
         let row = sqlx::query(
             "SELECT encrypted_value, nonce FROM vault_entries WHERE key = ?1",
         )
@@ -131,14 +131,14 @@ impl Vault {
         let value = String::from_utf8(plaintext)
             .map_err(|e| StarpodError::Vault(format!("Invalid UTF-8 in decrypted value: {}", e)))?;
 
-        self.audit(key, "get").await?;
+        self.audit(key, "get", user_id).await?;
         debug!(key = %key, "Vault get");
 
         Ok(Some(value))
     }
 
     /// Encrypt and store a value. Overwrites if the key already exists.
-    pub async fn set(&self, key: &str, value: &str) -> Result<()> {
+    pub async fn set(&self, key: &str, value: &str, user_id: Option<&str>) -> Result<()> {
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
         let ciphertext = self
             .cipher
@@ -163,21 +163,21 @@ impl Vault {
         .await
         .map_err(|e| StarpodError::Database(format!("Insert failed: {}", e)))?;
 
-        self.audit(key, "set").await?;
+        self.audit(key, "set", user_id).await?;
         debug!(key = %key, "Vault set");
 
         Ok(())
     }
 
     /// Delete a key from the vault.
-    pub async fn delete(&self, key: &str) -> Result<()> {
+    pub async fn delete(&self, key: &str, user_id: Option<&str>) -> Result<()> {
         sqlx::query("DELETE FROM vault_entries WHERE key = ?1")
             .bind(key)
             .execute(&self.pool)
             .await
             .map_err(|e| StarpodError::Database(format!("Delete failed: {}", e)))?;
 
-        self.audit(key, "delete").await?;
+        self.audit(key, "delete", user_id).await?;
         debug!(key = %key, "Vault delete");
 
         Ok(())
@@ -195,12 +195,13 @@ impl Vault {
     }
 
     /// Append an entry to the audit log.
-    pub async fn audit(&self, key: &str, action: &str) -> Result<()> {
+    pub async fn audit(&self, key: &str, action: &str, user_id: Option<&str>) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        sqlx::query("INSERT INTO vault_audit (key, action, timestamp) VALUES (?1, ?2, ?3)")
+        sqlx::query("INSERT INTO vault_audit (key, action, timestamp, user_id) VALUES (?1, ?2, ?3, ?4)")
             .bind(key)
             .bind(action)
             .bind(&now)
+            .bind(user_id)
             .execute(&self.pool)
             .await
             .map_err(|e| StarpodError::Database(format!("Audit log failed: {}", e)))?;
@@ -211,8 +212,8 @@ impl Vault {
     ///
     /// Records a `"env_read"` entry in the audit log without decrypting
     /// anything — just tracks that the agent accessed this key.
-    pub async fn log_env_read(&self, key: &str) -> Result<()> {
-        self.audit(key, "env_read").await
+    pub async fn log_env_read(&self, key: &str, user_id: Option<&str>) -> Result<()> {
+        self.audit(key, "env_read", user_id).await
     }
 }
 
@@ -270,42 +271,42 @@ mod tests {
     #[tokio::test]
     async fn test_set_and_get() {
         let vault = setup().await;
-        vault.set("api_key", "sk-secret-123").await.unwrap();
-        let val = vault.get("api_key").await.unwrap();
+        vault.set("api_key", "sk-secret-123", None).await.unwrap();
+        let val = vault.get("api_key", None).await.unwrap();
         assert_eq!(val.as_deref(), Some("sk-secret-123"));
     }
 
     #[tokio::test]
     async fn test_get_nonexistent() {
         let vault = setup().await;
-        let val = vault.get("nope").await.unwrap();
+        let val = vault.get("nope", None).await.unwrap();
         assert_eq!(val, None);
     }
 
     #[tokio::test]
     async fn test_overwrite() {
         let vault = setup().await;
-        vault.set("token", "old").await.unwrap();
-        vault.set("token", "new").await.unwrap();
-        let val = vault.get("token").await.unwrap();
+        vault.set("token", "old", None).await.unwrap();
+        vault.set("token", "new", None).await.unwrap();
+        let val = vault.get("token", None).await.unwrap();
         assert_eq!(val.as_deref(), Some("new"));
     }
 
     #[tokio::test]
     async fn test_delete() {
         let vault = setup().await;
-        vault.set("temp", "value").await.unwrap();
-        vault.delete("temp").await.unwrap();
-        let val = vault.get("temp").await.unwrap();
+        vault.set("temp", "value", None).await.unwrap();
+        vault.delete("temp", None).await.unwrap();
+        let val = vault.get("temp", None).await.unwrap();
         assert_eq!(val, None);
     }
 
     #[tokio::test]
     async fn test_list_keys() {
         let vault = setup().await;
-        vault.set("beta", "2").await.unwrap();
-        vault.set("alpha", "1").await.unwrap();
-        vault.set("gamma", "3").await.unwrap();
+        vault.set("beta", "2", None).await.unwrap();
+        vault.set("alpha", "1", None).await.unwrap();
+        vault.set("gamma", "3", None).await.unwrap();
 
         let keys = vault.list_keys().await.unwrap();
         assert_eq!(keys, vec!["alpha", "beta", "gamma"]);
@@ -317,20 +318,20 @@ mod tests {
 
         // Set with one key
         let vault1 = Vault::from_pool(pool.clone(), &[0xAA; 32]).await.unwrap();
-        vault1.set("secret", "hidden").await.unwrap();
+        vault1.set("secret", "hidden", None).await.unwrap();
 
         // Try to read with a different key
         let vault2 = Vault::from_pool(pool, &[0xBB; 32]).await.unwrap();
-        let result = vault2.get("secret").await;
+        let result = vault2.get("secret", None).await;
         assert!(result.is_err(), "Should fail to decrypt with wrong key");
     }
 
     #[tokio::test]
     async fn test_audit_log() {
         let vault = setup().await;
-        vault.set("k1", "v1").await.unwrap();
-        vault.get("k1").await.unwrap();
-        vault.delete("k1").await.unwrap();
+        vault.set("k1", "v1", None).await.unwrap();
+        vault.get("k1", None).await.unwrap();
+        vault.delete("k1", None).await.unwrap();
 
         // Check audit log directly
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM vault_audit")
@@ -338,6 +339,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count.0, 3); // set + get + delete
+    }
+
+    #[tokio::test]
+    async fn test_audit_log_tracks_user_id() {
+        let vault = setup().await;
+
+        vault.set("k1", "v1", Some("alice")).await.unwrap();
+        vault.get("k1", Some("bob")).await.unwrap();
+        vault.delete("k1", None).await.unwrap();
+        vault.log_env_read("HOME", Some("charlie")).await.unwrap();
+
+        let rows = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT action, user_id FROM vault_audit ORDER BY id",
+        )
+        .fetch_all(&vault.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[0], ("set".to_string(), Some("alice".to_string())));
+        assert_eq!(rows[1], ("get".to_string(), Some("bob".to_string())));
+        assert_eq!(rows[2], ("delete".to_string(), None));
+        assert_eq!(rows[3], ("env_read".to_string(), Some("charlie".to_string())));
     }
 
     // ── derive_master_key tests ───────────────────────────────────

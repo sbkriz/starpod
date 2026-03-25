@@ -10,5 +10,6 @@ CREATE TABLE IF NOT EXISTS vault_audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key TEXT NOT NULL,
     action TEXT NOT NULL,
-    timestamp TEXT NOT NULL
+    timestamp TEXT NOT NULL,
+    user_id TEXT
 );
