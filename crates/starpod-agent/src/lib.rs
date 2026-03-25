@@ -1235,6 +1235,11 @@ impl StarpodAgent {
         &self.cron
     }
 
+    /// Get a reference to the vault (if available).
+    pub fn vault(&self) -> Option<&Arc<starpod_vault::Vault>> {
+        self.vault.as_ref()
+    }
+
     /// Get a snapshot of the current config.
     pub fn config(&self) -> StarpodConfig {
         self.snapshot_config()

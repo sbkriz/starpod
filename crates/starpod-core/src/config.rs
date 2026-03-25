@@ -19,8 +19,7 @@ pub fn warn_credentials_in_toml(value: &toml::Value, file_label: &str) {
                             file = file_label,
                             provider = name,
                             "api_key in [providers.{name}] is ignored — \
-                             move it to .env as {}_API_KEY",
-                            name.to_uppercase()
+                             set it via Settings or the vault",
                         );
                     }
                 }
@@ -33,7 +32,7 @@ pub fn warn_credentials_in_toml(value: &toml::Value, file_label: &str) {
                     warn!(
                         file = file_label,
                         "bot_token in [channels.telegram] is ignored — \
-                         move it to .env as TELEGRAM_BOT_TOKEN"
+                         set it via Settings or the vault"
                     );
                 }
             }

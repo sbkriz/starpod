@@ -61,6 +61,8 @@ pub struct AppState {
     pub model_registry: Arc<ModelRegistry>,
     /// Broadcast channel for pushing events to connected WebSocket clients.
     pub events_tx: tokio::sync::broadcast::Sender<GatewayEvent>,
+    /// Encrypted credential vault for system keys (API keys, bot tokens).
+    pub vault: Option<Arc<starpod_vault::Vault>>,
 }
 
 /// Embedded web UI assets (built by Vite into static/dist/).
@@ -303,6 +305,7 @@ pub async fn serve_with_agent(
         }
     }
 
+    let vault = agent.vault().cloned();
     let state = Arc::new(AppState {
         agent,
         auth,
@@ -311,6 +314,7 @@ pub async fn serve_with_agent(
         paths,
         model_registry: Arc::new(model_registry),
         events_tx,
+        vault,
     });
 
     // Start config file watcher in background

@@ -34,8 +34,8 @@ agent_name = "Aster"              # Agent display name (personality in SOUL.md)
 # self_improve = false
 
 # ─── Providers ─────────────────────────────────────────
-# API keys must be set via environment variables or .env files, not here.
-# e.g. ANTHROPIC_API_KEY=sk-ant-... in .env
+# API keys are stored in the encrypted vault (managed via Settings UI).
+# For local dev, set them in .env (populated into vault at startup).
 
 [providers.anthropic]
 # enabled = true
@@ -102,7 +102,7 @@ agent_name = "Aster"              # Agent display name (personality in SOUL.md)
 [channels.telegram]
 # enabled = true                  # Enable/disable the Telegram channel
 # gap_minutes = 360               # Inactivity gap (minutes) before new session (6h)
-# allowed_users = [123456789]     # Empty = no one can chat; set TELEGRAM_BOT_TOKEN in .env
+# allowed_users = [123456789]     # Empty = no one can chat; set TELEGRAM_BOT_TOKEN via Settings
 # stream_mode = "final_only"      # "final_only" or "all_messages"
 ```
 
@@ -135,12 +135,12 @@ Edit these files directly to customize agent behavior or update user info. The a
 
 ## API Key Resolution
 
-API keys are resolved exclusively from environment variables (or `.env` files). There is no `api_key` field in config files — any `api_key` found in a config file is ignored and triggers a warning.
+API keys are stored in the **encrypted vault** and managed via the Settings UI. There is no `api_key` field in config files — any `api_key` found in a config file is ignored and triggers a warning.
 
-Each provider uses its conventional env var (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). Ollama requires no API key by default.
+Each provider uses its conventional env var name (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). For local development, keys can be placed in `.env` — they are populated into the vault at startup. Ollama requires no API key by default.
 
 ::: warning
-Never commit API keys to version control. Store them in `.env` files (which are gitignored) or set them as environment variables.
+Never commit API keys to version control. Use the Settings UI or `.env` files (gitignored, dev only).
 :::
 
 ## Telegram Settings
@@ -153,7 +153,7 @@ Telegram settings live in `agent.toml` under `[channels.telegram]` and can also 
 | `gap_minutes` | integer | `360` | Inactivity gap (minutes) before new session |
 | `stream_mode` | string | `"final_only"` | `"final_only"` or `"all_messages"` |
 
-The bot token must be set via the `TELEGRAM_BOT_TOKEN` environment variable (or `.env` file), not in config.
+The bot token is stored in the encrypted vault. Set it via **Settings > Channels** in the web UI, or add `TELEGRAM_BOT_TOKEN` to `.env` for local development.
 
 ### Telegram User Linking
 

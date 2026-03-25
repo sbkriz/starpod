@@ -747,7 +747,7 @@ pub async fn handle_custom_tool(
                                   • Files: FileRead, FileWrite, FileList, FileDelete\n\
                                   • Skills: SkillCreate, SkillUpdate, SkillDelete, SkillList\n\
                                   • Cron: CronAdd, CronList, CronRemove, CronUpdate\n\
-                                  • Vault: VaultGet, VaultSet".to_string(),
+                                  • Environment: EnvGet".to_string(),
                         is_error: true,
                         raw_content: None,
                     });
@@ -1665,7 +1665,7 @@ pub async fn handle_custom_tool(
                 Some(k) => k.clone(),
                 None => {
                     return Some(ToolResult {
-                        content: "BRAVE_API_KEY not set. Add it to .env to enable web search."
+                        content: "BRAVE_API_KEY not set. Configure it in Settings > Internet to enable web search."
                             .into(),
                         is_error: true,
                         raw_content: None,
@@ -3222,6 +3222,8 @@ mod tests {
         assert!(result.content.contains("FileRead"), "Should suggest FileRead");
         assert!(result.content.contains("SkillCreate"), "Should suggest SkillCreate");
         assert!(result.content.contains("CronAdd"), "Should suggest CronAdd");
+        assert!(result.content.contains("EnvGet"), "Should suggest EnvGet");
+        assert!(!result.content.contains("VaultGet"), "Should not mention removed VaultGet tool");
     }
 
     // ── Browser tool handler tests ──────────────────────────────────

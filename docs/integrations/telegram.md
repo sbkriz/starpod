@@ -14,21 +14,15 @@ Starpod can run as a Telegram bot, sharing the same agent instance as the web UI
 
 ### 2. Add the Token
 
-Add the token to your `.env` file (secrets should never go in config files):
+Set the token via the **Settings > Channels** page in the web UI, or add it to your `.env` file for local development:
 
 ```bash
-# workspace .env
+# .env (dev only — populated into the vault at startup)
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
 ```
 
-Or as an environment variable:
-
-```bash
-export TELEGRAM_BOT_TOKEN="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
-```
-
 ::: tip
-`starpod init` can set this up during the interactive wizard.
+`starpod init` can set this up during the interactive wizard. In production, use the Settings UI — the token is stored in the encrypted vault.
 :::
 
 ### 3. Restrict Access

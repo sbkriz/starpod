@@ -446,6 +446,7 @@ mod tests {
             paths,
             model_registry: Arc::new(agent_sdk::models::ModelRegistry::with_defaults()),
             events_tx,
+            vault: None,
         });
 
         (tmp, state)

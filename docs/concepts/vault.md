@@ -16,7 +16,7 @@ The Vault crate still exists for **programmatic use** from Rust code (e.g., stor
 
 ## Programmatic Use
 
-The vault is available as a Rust library (`starpod_vault::Vault`) but does not have CLI commands. Secrets should be stored in `.env` files and accessed by the agent via the `EnvGet` tool.
+The vault is available as a Rust library (`starpod_vault::Vault`). System keys (API keys, bot tokens) are stored in the vault and managed via the Settings UI. For local development, secrets can be placed in `.env` — they are populated into the vault at startup via `populate_vault()`. The agent accesses secrets via the `EnvGet` tool.
 
 ## Use Cases
 

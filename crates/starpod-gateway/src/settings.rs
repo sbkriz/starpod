@@ -35,7 +35,6 @@ use serde::{Deserialize, Serialize};
 use starpod_auth::Role;
 use starpod_core::{FrontendConfig, FollowupMode, ReasoningEffort, reload_agent_config};
 
-use starpod_core::ResolvedPaths;
 
 use crate::routes::{authenticate_request, ErrorResponse};
 use crate::AppState;
@@ -261,7 +260,7 @@ struct TelegramChannelSettings {
     gap_minutes: Option<i64>,
     #[serde(default)]
     stream_mode: Option<String>,
-    /// Bot token — read from / written to `.env` as `TELEGRAM_BOT_TOKEN`.
+    /// Bot token — read from / written to the encrypted vault.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     bot_token: Option<String>,
 }
@@ -1492,13 +1491,16 @@ async fn get_internet(
     let auth_user = authenticate_request(&state, &headers).await?;
     require_admin(&auth_user)?;
 
-    let cfg = state.config.read().unwrap();
-    let brave_api_key = read_env_var(&state.paths, "BRAVE_API_KEY");
+    let (enabled, timeout_secs, max_fetch_bytes, max_text_chars) = {
+        let cfg = state.config.read().unwrap();
+        (cfg.internet.enabled, cfg.internet.timeout_secs, cfg.internet.max_fetch_bytes, cfg.internet.max_text_chars)
+    };
+    let brave_api_key = read_vault_key(&state, "BRAVE_API_KEY").await;
     Ok(Json(InternetSettings {
-        enabled: cfg.internet.enabled,
-        timeout_secs: cfg.internet.timeout_secs,
-        max_fetch_bytes: cfg.internet.max_fetch_bytes,
-        max_text_chars: cfg.internet.max_text_chars,
+        enabled,
+        timeout_secs,
+        max_fetch_bytes,
+        max_text_chars,
         brave_api_key,
     }))
 }
@@ -1538,13 +1540,9 @@ async fn put_internet(
 
     write_agent_toml(&state, &doc)?;
 
-    // Write Brave API key to .env
+    // Write Brave API key to vault
     if let Some(ref key) = settings.brave_api_key {
-        write_env_var(
-            &state.paths,
-            "BRAVE_API_KEY",
-            if key.is_empty() { None } else { Some(key) },
-        )?;
+        write_vault_key(&state, "BRAVE_API_KEY", if key.is_empty() { None } else { Some(key) }).await?;
     }
 
     Ok(ok_json())
@@ -1559,9 +1557,11 @@ async fn get_channels(
     let auth_user = authenticate_request(&state, &headers).await?;
     require_admin(&auth_user)?;
 
-    let cfg = state.config.read().unwrap();
-    let tg = cfg.channels.telegram.clone().unwrap_or_default();
-    let bot_token = read_env_var(&state.paths, "TELEGRAM_BOT_TOKEN");
+    let tg = {
+        let cfg = state.config.read().unwrap();
+        cfg.channels.telegram.clone().unwrap_or_default()
+    };
+    let bot_token = read_vault_key(&state, "TELEGRAM_BOT_TOKEN").await;
     Ok(Json(ChannelsSettings {
         telegram: TelegramChannelSettings {
             enabled: tg.enabled,
@@ -1607,9 +1607,9 @@ async fn put_channels(
 
     write_agent_toml(&state, &doc)?;
 
-    // Write bot token to .env file
+    // Write bot token to vault
     if let Some(ref token) = settings.telegram.bot_token {
-        write_env_var(&state.paths, "TELEGRAM_BOT_TOKEN", if token.is_empty() { None } else { Some(token) })?;
+        write_vault_key(&state, "TELEGRAM_BOT_TOKEN", if token.is_empty() { None } else { Some(token) }).await?;
     }
 
     Ok(ok_json())
@@ -1766,69 +1766,36 @@ fn set_or_remove_string(table: &mut toml::map::Map<String, toml::Value>, key: &s
     }
 }
 
-/// Read a variable from the `.env` file (raw file parsing, not `std::env`).
-fn read_env_var(paths: &ResolvedPaths, key: &str) -> Option<String> {
-    let env_path = paths.agent_home.join(".env");
-    let content = std::fs::read_to_string(&env_path).ok()?;
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix(key) {
-            if let Some(value) = rest.strip_prefix('=') {
-                return Some(value.trim().to_string());
-            }
+/// Read a system key from the vault, falling back to the process environment.
+async fn read_vault_key(state: &AppState, key: &str) -> Option<String> {
+    if let Some(ref vault) = state.vault {
+        if let Ok(Some(v)) = vault.get(key, None).await {
+            return Some(v);
         }
     }
-    None
+    // Fallback: process env (covers dev mode where .env is loaded at startup)
+    std::env::var(key).ok()
 }
 
-/// Write (or remove) a variable in the `.env` file.
-fn write_env_var(
-    paths: &ResolvedPaths,
+/// Write (or delete) a system key in the vault, keeping the process env in sync.
+async fn write_vault_key(
+    state: &AppState,
     key: &str,
     value: Option<&str>,
 ) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
-    let env_path = paths.agent_home.join(".env");
-    let content = std::fs::read_to_string(&env_path).unwrap_or_default();
-
-    let mut found = false;
-    let mut lines: Vec<String> = content
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with(&format!("{key}=")) {
-                found = true;
-                // Replace or remove
-                value.map(|v| format!("{key}={v}"))
-            } else {
-                Some(line.to_string())
-            }
-        })
-        .collect();
-
-    if !found {
-        if let Some(v) = value {
-            lines.push(format!("{key}={v}"));
+    let vault = state.vault.as_ref().ok_or_else(|| internal("vault not available"))?;
+    match value {
+        Some(v) => {
+            vault.set(key, v, None).await
+                .map_err(|e| internal(format!("vault set {key}: {e}")))?;
+            std::env::set_var(key, v);
+        }
+        None => {
+            vault.delete(key, None).await
+                .map_err(|e| internal(format!("vault delete {key}: {e}")))?;
+            std::env::remove_var(key);
         }
     }
-
-    // Ensure trailing newline
-    let mut output = lines.join("\n");
-    if !output.ends_with('\n') {
-        output.push('\n');
-    }
-
-    std::fs::write(&env_path, output)
-        .map_err(|e| internal(format!("Failed to write {}: {}", env_path.display(), e)))?;
-
-    // Also update the process env so config reload picks it up
-    match value {
-        Some(v) => std::env::set_var(key, v),
-        None => std::env::remove_var(key),
-    }
-
     Ok(())
 }
 
@@ -1908,6 +1875,7 @@ mod tests {
             paths,
             model_registry: Arc::new(agent_sdk::models::ModelRegistry::with_defaults()),
             events_tx,
+            vault: None,
         });
 
         (tmp, state)
@@ -3272,5 +3240,133 @@ mod tests {
         assert_eq!(parsed.timeout_secs, 30);
         assert_eq!(parsed.max_fetch_bytes, 1_048_576);
         assert!(parsed.brave_api_key.is_none());
+    }
+
+    // ── Vault integration ────────────────────────────────────────────────
+
+    /// Build an AppState with a real vault for secret-storage tests.
+    async fn test_app_state_with_vault() -> (tempfile::TempDir, Arc<AppState>) {
+        let (tmp, state) = test_app_state().await;
+        let master_key = [0u8; 32];
+        let vault = starpod_vault::Vault::new(
+            &state.paths.db_dir.join("vault.db"),
+            &master_key,
+        )
+        .await
+        .unwrap();
+        let state = Arc::new(AppState {
+            agent: Arc::clone(&state.agent),
+            auth: Arc::clone(&state.auth),
+            rate_limiter: Arc::clone(&state.rate_limiter),
+            config: RwLock::new(state.config.read().unwrap().clone()),
+            paths: state.paths.clone(),
+            model_registry: Arc::clone(&state.model_registry),
+            events_tx: state.events_tx.clone(),
+            vault: Some(Arc::new(vault)),
+        });
+        (tmp, state)
+    }
+
+    #[tokio::test]
+    async fn read_vault_key_returns_none_without_vault() {
+        let (_tmp, state) = test_app_state().await;
+        // Use a key guaranteed not to exist in process env
+        let result = super::read_vault_key(&state, "STARPOD_TEST_NONEXISTENT_KEY_42").await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn write_vault_key_fails_without_vault() {
+        let (_tmp, state) = test_app_state().await;
+        let result = super::write_vault_key(&state, "TEST_KEY", Some("val")).await;
+        assert!(result.is_err(), "write_vault_key should fail when vault is None");
+    }
+
+    #[tokio::test]
+    async fn vault_roundtrip_set_get_delete() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+
+        // Initially empty
+        let val = super::read_vault_key(&state, "TEST_SECRET").await;
+        assert!(val.is_none());
+
+        // Set a value
+        super::write_vault_key(&state, "TEST_SECRET", Some("s3cret")).await.unwrap();
+        let val = super::read_vault_key(&state, "TEST_SECRET").await;
+        assert_eq!(val.as_deref(), Some("s3cret"));
+
+        // Process env should also be updated
+        assert_eq!(std::env::var("TEST_SECRET").ok().as_deref(), Some("s3cret"));
+
+        // Delete
+        super::write_vault_key(&state, "TEST_SECRET", None).await.unwrap();
+        let val = super::read_vault_key(&state, "TEST_SECRET").await;
+        assert!(val.is_none());
+        assert!(std::env::var("TEST_SECRET").is_err());
+    }
+
+    #[tokio::test]
+    async fn put_channels_stores_bot_token_in_vault() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+        let body = serde_json::json!({
+            "telegram": {
+                "enabled": true,
+                "gap_minutes": 120,
+                "stream_mode": "final_only",
+                "bot_token": "123:ABC"
+            }
+        });
+        let (status, _) = put_json(Arc::clone(&state), "/api/settings/channels", body).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Token should be in vault, not in .env
+        let vault = state.vault.as_ref().unwrap();
+        let stored = vault.get("TELEGRAM_BOT_TOKEN", None).await.unwrap();
+        assert_eq!(stored.as_deref(), Some("123:ABC"));
+
+        // GET should return the token from vault
+        let (_, json) = get_json(state, "/api/settings/channels").await;
+        assert_eq!(json["telegram"]["bot_token"], "123:ABC");
+    }
+
+    #[tokio::test]
+    async fn put_internet_stores_brave_key_in_vault() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+        let body = serde_json::json!({
+            "enabled": true,
+            "timeout_secs": 15,
+            "max_fetch_bytes": 2097152,
+            "max_text_chars": 50000,
+            "brave_api_key": "BSA-test-key"
+        });
+        let (status, _) = put_json(Arc::clone(&state), "/api/settings/internet", body).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Key should be in vault
+        let vault = state.vault.as_ref().unwrap();
+        let stored = vault.get("BRAVE_API_KEY", None).await.unwrap();
+        assert_eq!(stored.as_deref(), Some("BSA-test-key"));
+
+        // GET should return it
+        let (_, json) = get_json(state, "/api/settings/internet").await;
+        assert_eq!(json["brave_api_key"], "BSA-test-key");
+    }
+
+    #[tokio::test]
+    async fn put_channels_empty_token_deletes_from_vault() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+        // First set a token
+        let vault = state.vault.as_ref().unwrap();
+        vault.set("TELEGRAM_BOT_TOKEN", "old-token", None).await.unwrap();
+
+        // Then send empty token to clear it
+        let body = serde_json::json!({
+            "telegram": { "enabled": false, "bot_token": "" }
+        });
+        let (status, _) = put_json(Arc::clone(&state), "/api/settings/channels", body).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let stored = vault.get("TELEGRAM_BOT_TOKEN", None).await.unwrap();
+        assert!(stored.is_none(), "empty token should delete from vault");
     }
 }

@@ -718,6 +718,7 @@ mod tests {
             paths,
             model_registry: Arc::new(agent_sdk::models::ModelRegistry::with_defaults()),
             events_tx,
+            vault: None,
         });
 
         (tmp, state)
@@ -811,6 +812,7 @@ mod tests {
             paths: state.paths.clone(),
             model_registry: Arc::clone(&state.model_registry),
             events_tx: state.events_tx.clone(),
+            vault: None,
         });
 
         // First request should succeed (use /api/sessions which requires auth)
