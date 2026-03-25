@@ -92,6 +92,19 @@ output = 180.0
 context_window = 1100000
 supports_vision = true
 
+# --- GPT-5.3 series (specialized) ---
+
+[openai.models."gpt-5.3-chat-latest"]
+input = 1.75
+output = 14.0
+context_window = 1100000
+supports_vision = true
+
+[openai.models."gpt-5.3-codex"]
+input = 1.75
+output = 14.0
+context_window = 1100000
+
 # --- GPT-5 / 5.2 series ---
 
 [openai.models.gpt-5]
@@ -311,4 +324,11 @@ context_window = 128000
 # Local models — no API key, free.
 
 [ollama]
-default_model = "llama3.3"
+default_model = "qwen3.5:9b"
+
+[ollama.models."qwen3.5:9b"]
+input = 0.0
+output = 0.0
+context_window = 131072
+supports_vision = true
+supports_tool_use = true
