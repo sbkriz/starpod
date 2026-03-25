@@ -654,4 +654,86 @@ mod tests {
         // Should not panic — no subscribers is fine
         let _ = tx.send(event);
     }
+
+    fn test_paths(dir: &std::path::Path) -> starpod_core::ResolvedPaths {
+        let agent_home = dir.join("starpod");
+        let config_dir = agent_home.join("config");
+        let db_dir = agent_home.join("db");
+        let skills_dir = agent_home.join("skills");
+        let users_dir = agent_home.join("users");
+        let home_dir = dir.join("home");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        std::fs::create_dir_all(&users_dir).unwrap();
+        std::fs::create_dir_all(&home_dir).unwrap();
+        starpod_core::ResolvedPaths {
+            mode: starpod_core::Mode::SingleAgent { starpod_dir: agent_home.clone() },
+            agent_toml: config_dir.join("agent.toml"),
+            agent_home,
+            config_dir,
+            db_dir,
+            skills_dir,
+            project_root: dir.to_path_buf(),
+            instance_root: dir.to_path_buf(),
+            home_dir,
+            users_dir,
+            env_file: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn create_auth_store_uses_env_api_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = test_paths(dir.path());
+
+        // Set env var before creating auth store
+        std::env::set_var("STARPOD_API_KEY", "test-secret-key-123");
+
+        let bootstrap = create_auth_store(&paths).await.unwrap();
+
+        // First run: should return the configured key
+        assert_eq!(bootstrap.admin_key.as_deref(), Some("test-secret-key-123"));
+
+        // Verify the key actually works for auth
+        let user = bootstrap.store.authenticate_api_key("test-secret-key-123").await.unwrap();
+        assert!(user.is_some(), "imported key should authenticate successfully");
+
+        // Second run: admin exists, returns None (this is why dev needs the fallback)
+        let bootstrap2 = create_auth_store(&paths).await.unwrap();
+        assert!(bootstrap2.admin_key.is_none(), "should return None when admin already exists");
+
+        std::env::remove_var("STARPOD_API_KEY");
+    }
+
+    #[tokio::test]
+    async fn create_auth_store_generates_key_without_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = test_paths(dir.path());
+
+        // Ensure STARPOD_API_KEY is NOT set
+        std::env::remove_var("STARPOD_API_KEY");
+
+        let bootstrap = create_auth_store(&paths).await.unwrap();
+
+        // Should auto-generate a key (may be env-provided if test runs parallel
+        // with create_auth_store_uses_env_api_key, but must always return Some)
+        assert!(bootstrap.admin_key.is_some(), "should generate a key on first run");
+    }
+
+    #[tokio::test]
+    async fn create_auth_store_returns_none_on_subsequent_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = test_paths(dir.path());
+
+        std::env::remove_var("STARPOD_API_KEY");
+
+        // First run bootstraps the admin
+        let bootstrap1 = create_auth_store(&paths).await.unwrap();
+        assert!(bootstrap1.admin_key.is_some());
+
+        // Second run: admin already exists → returns None
+        let bootstrap2 = create_auth_store(&paths).await.unwrap();
+        assert!(bootstrap2.admin_key.is_none(), "should return None when admin already exists");
+    }
 }

@@ -1752,14 +1752,29 @@ async fn main() -> anyhow::Result<()> {
 
             // Populate vault from .env + deploy.toml, then inject into process env
             let deploy_toml = blueprint_dir.join("deploy.toml");
+            let env_file = workspace_root.join(".env");
             if deploy_toml.exists() {
-                let env_file = workspace_root.join(".env");
                 let env_path = if env_file.exists() { Some(env_file.as_path()) } else { None };
                 let master_key = starpod_vault::derive_master_key(&paths.db_dir)?;
                 let vault = starpod_vault::Vault::new(&paths.db_dir.join("vault.db"), &master_key).await?;
                 starpod_vault::env::populate_vault(&deploy_toml, env_path, &vault).await?;
                 starpod_vault::env::inject_env_from_vault(&deploy_toml, &vault).await?;
             }
+
+            // In dev mode, load STARPOD_API_KEY from .env into process env so
+            // that bootstrap_admin uses the configured key rather than generating
+            // a random one. (In prod this is handled by build-time pre-seeding.)
+            let dev_api_key = if env_file.exists() {
+                let env_map = parse_env_file(&env_file)?;
+                if let Some(api_key) = env_map.get("STARPOD_API_KEY") {
+                    std::env::set_var("STARPOD_API_KEY", api_key);
+                    Some(api_key.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
             let mut agent_config = starpod_core::load_agent_config(&paths)?;
 
@@ -1779,13 +1794,20 @@ async fn main() -> anyhow::Result<()> {
             let auth_store = auth_bootstrap.store.clone();
             let cron_notifier = build_cron_notifier(&config);
 
+            // Resolve the token for the browser: prefer freshly-bootstrapped key,
+            // fall back to the .env key (covers subsequent runs where admin exists).
+            let browser_token = auth_bootstrap.admin_key.as_ref().or(dev_api_key.as_ref());
+
             print_header_with_name(&display_name);
             println!("  {} {} → {}", "DEV".bright_yellow().bold(), agent_name.bright_cyan(), instance_dir.display().to_string().dimmed());
             println!("  {} {}", "Server".dimmed(), addr.bright_green());
+            if let Some(ref key) = browser_token {
+                println!("  {} {}", "API Key".dimmed(), key.bright_cyan());
+            }
             print_separator();
 
             // Open browser with auto-login token if we have one
-            if let Some(ref key) = auth_bootstrap.admin_key {
+            if let Some(key) = browser_token {
                 let _ = open::that(format!("http://{}?token={}", addr, key));
             } else {
                 let _ = open::that(format!("http://{}", addr));
@@ -2475,6 +2497,14 @@ async fn main() -> anyhow::Result<()> {
                             println!("    {:<24} {}", s.key, status);
                         }
 
+                        // Parse local .env once for both required and optional secret prompts
+                        let env_path = std::path::PathBuf::from(".env");
+                        let local_env = if env_path.exists() {
+                            Some(parse_env_file(&env_path)?)
+                        } else {
+                            None
+                        };
+
                         // Handle missing required secrets
                         if !config.missing_required.is_empty() {
                             println!(
@@ -2485,9 +2515,8 @@ async fn main() -> anyhow::Result<()> {
                             );
 
                             // Try to find them in local .env
-                            let env_path = std::path::PathBuf::from(".env");
-                            if env_path.exists() && !yes {
-                                let local_env = parse_env_file(&env_path)?;
+                            if local_env.is_some() && !yes {
+                                let local_env = local_env.as_ref().unwrap();
                                 let pushable: Vec<&String> = config
                                     .missing_required
                                     .iter()
@@ -2557,6 +2586,41 @@ async fn main() -> anyhow::Result<()> {
                             }
                         } else {
                             println!("\n  {} All required secrets present.", "✓".green().bold());
+                        }
+
+                        // Handle optional secrets available in local .env
+                        if !yes {
+                            if let Some(ref local_env) = local_env {
+                                let optional_missing: Vec<_> = config.secrets.iter()
+                                    .filter(|s| !s.present && !s.required && local_env.contains_key(s.key.as_str()))
+                                    .collect();
+
+                                if !optional_missing.is_empty() {
+                                    println!("\n  Found optional secrets in local .env:");
+                                    for s in &optional_missing {
+                                        let value = &local_env[s.key.as_str()];
+                                        eprint!("  ? Push {} to remote? [y/N] ", s.key.bright_white());
+                                        let mut buf = String::new();
+                                        std::io::stdin().read_line(&mut buf)?;
+                                        let answer = buf.trim().to_lowercase();
+                                        if answer == "y" || answer == "yes" {
+                                            match deploy_client.set_secret(&agent.id, &s.key, value).await {
+                                                Ok(resp) => {
+                                                    println!(
+                                                        "    {} {} pushed (hint: ••••{})",
+                                                        "✓".green(),
+                                                        s.key,
+                                                        resp.hint.as_deref().unwrap_or("****")
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("    {} Failed to push {}: {}", "✗".red(), s.key, e);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         // Show variables
