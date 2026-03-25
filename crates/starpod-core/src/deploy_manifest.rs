@@ -123,15 +123,18 @@ impl DeployManifest {
         let mut agent = EnvSection::default();
 
         // Infer agent-level secrets from provider config
+        // Local providers (ollama, etc.) don't require API keys
+        const LOCAL_PROVIDERS: &[&str] = &["ollama"];
         let mut providers_seen = std::collections::HashSet::new();
         for model_spec in &config.models {
             if let Some(provider) = model_spec.split('/').next() {
                 if providers_seen.insert(provider.to_string()) {
+                    let is_local = LOCAL_PROVIDERS.contains(&provider);
                     let key = format!("{}_API_KEY", provider.to_uppercase());
                     let desc = format!("{} API key", provider);
                     agent.secrets.insert(key.clone(), SecretEntry {
                         secret: key,
-                        required: true,
+                        required: !is_local,
                         description: desc,
                     });
                 }
@@ -369,6 +372,18 @@ mod tests {
         assert!(manifest.agent.secrets.contains_key("ANTHROPIC_API_KEY"));
         assert!(manifest.agent.secrets.contains_key("OPENAI_API_KEY"));
         assert_eq!(manifest.agent.secrets.len(), 2); // no duplicate
+    }
+
+    #[test]
+    fn test_local_provider_optional_api_key() {
+        let config = AgentConfigInput {
+            models: vec!["ollama/llama3".to_string()],
+            telegram_enabled: false,
+            internet_enabled: false,
+        };
+        let manifest = DeployManifest::generate(&config, vec![]);
+        assert!(manifest.agent.secrets.contains_key("OLLAMA_API_KEY"));
+        assert!(!manifest.agent.secrets["OLLAMA_API_KEY"].required);
     }
 
     #[test]
