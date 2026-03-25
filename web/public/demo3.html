@@ -1,0 +1,1445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Starpod - Launch Demo 3</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap');
+
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  :root {
+    --bg: #030303;
+    --panel: rgba(10, 10, 12, 0.94);
+    --panel-2: rgba(14, 14, 18, 0.96);
+    --panel-soft: rgba(255, 255, 255, 0.03);
+    --border: rgba(255, 255, 255, 0.10);
+    --border-strong: rgba(255, 255, 255, 0.18);
+    --text: #f6f3ec;
+    --text-soft: rgba(246, 243, 236, 0.76);
+    --text-dim: rgba(246, 243, 236, 0.42);
+    --accent: #c9c2b3;
+    --accent-green: #74d89a;
+    --accent-gold: #ddb15c;
+    --accent-blue: #89a8ff;
+    --accent-red: #e06d62;
+    --shadow: 0 28px 100px rgba(0, 0, 0, 0.52);
+    --ease-out: cubic-bezier(0.22, 0.68, 0, 1);
+    --ease-in: cubic-bezier(0.48, 0, 0.88, 0.28);
+    --dur-fast: 180ms;
+    --dur-md: 340ms;
+    --dur-slow: 620ms;
+  }
+
+  body {
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 20% 18%, rgba(137, 168, 255, 0.08), transparent 28%),
+      radial-gradient(circle at 82% 24%, rgba(221, 177, 92, 0.08), transparent 24%),
+      linear-gradient(180deg, #020202 0%, #060606 100%);
+    color: var(--text);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  .scene {
+    position: relative;
+    width: min(100vw, calc(100vh * 16 / 9));
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at center, rgba(255, 255, 255, 0.025), transparent 56%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 22%),
+      var(--bg);
+  }
+
+  .grid,
+  .grain,
+  .vignette,
+  .halo {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .grid {
+    opacity: 0.16;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 42px 42px;
+    mask-image: radial-gradient(circle at center, black 42%, transparent 96%);
+  }
+
+  .grain {
+    opacity: 0.04;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 160px;
+  }
+
+  .vignette {
+    background: radial-gradient(circle at center, transparent 40%, rgba(0, 0, 0, 0.62) 100%);
+  }
+
+  .halo {
+    opacity: 0;
+    transition: opacity var(--dur-slow) var(--ease-out);
+    background:
+      radial-gradient(circle at 50% 44%, rgba(255, 255, 255, 0.08), transparent 20%),
+      radial-gradient(circle at 50% 44%, rgba(221, 177, 92, 0.10), transparent 36%);
+  }
+
+  .halo.visible {
+    opacity: 1;
+  }
+
+  .logo-corner,
+  .logo-center,
+  .title-card,
+  .install-stage,
+  .workspace-stage,
+  .topology-stage,
+  .console-stage,
+  .closing-copy {
+    opacity: 0;
+    filter: blur(8px);
+    transition:
+      opacity var(--dur-slow) var(--ease-out),
+      filter var(--dur-slow) var(--ease-out),
+      transform var(--dur-slow) var(--ease-out);
+  }
+
+  .visible {
+    opacity: 1;
+    filter: blur(0);
+  }
+
+  .exit {
+    opacity: 0;
+    filter: blur(6px);
+    transition:
+      opacity var(--dur-md) var(--ease-in),
+      filter var(--dur-md) var(--ease-in),
+      transform var(--dur-md) var(--ease-in);
+  }
+
+  .logo-corner {
+    position: absolute;
+    top: 28px;
+    left: 32px;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.3px;
+    color: var(--text);
+    transform: translateY(6px);
+  }
+
+  .logo-corner.visible {
+    transform: translateY(0);
+  }
+
+  .logo-corner span,
+  .logo-center span {
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+
+  .logo-corner svg,
+  .logo-center svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .title-card {
+    position: absolute;
+    inset: 0;
+    z-index: 22;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    transform: scale(0.985);
+  }
+
+  .title-card.visible {
+    transform: scale(1);
+  }
+
+  .title-card.exit {
+    transform: scale(1.015);
+  }
+
+  .title-card h1 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: clamp(58px, 8vw, 96px);
+    font-weight: 700;
+    line-height: 0.96;
+    letter-spacing: -0.05em;
+    color: #fff;
+  }
+
+  .title-card.compact h1 {
+    font-size: clamp(50px, 7vw, 82px);
+  }
+
+  .title-card .subtle {
+    margin-top: 16px;
+    font-size: 14px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .install-stage,
+  .workspace-stage,
+  .console-stage {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%) translateY(12px) scale(0.985);
+    width: 88%;
+    z-index: 20;
+  }
+
+  .install-stage,
+  .workspace-stage {
+    top: 84px;
+  }
+
+  .console-stage {
+    top: 72px;
+  }
+
+  .install-stage.visible,
+  .workspace-stage.visible,
+  .console-stage.visible {
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+
+  .panel-shell {
+    position: relative;
+    border-radius: 30px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: var(--shadow);
+    padding: 22px;
+  }
+
+  .panel-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      radial-gradient(circle at top left, rgba(221, 177, 92, 0.10), transparent 24%),
+      radial-gradient(circle at top right, rgba(137, 168, 255, 0.08), transparent 22%);
+    pointer-events: none;
+  }
+
+  .terminal-window {
+    position: relative;
+    min-height: 420px;
+    border-radius: 26px;
+    background: #080b16;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+
+  .terminal-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .dot.red { background: #ff7d6f; }
+  .dot.yellow { background: #ffd56c; }
+  .dot.green { background: #74d89a; }
+
+  .terminal-name {
+    margin-left: 10px;
+    color: var(--text-dim);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .terminal-body {
+    padding: 30px 36px;
+    font-size: 18px;
+    line-height: 1.8;
+    color: #e7e4dd;
+  }
+
+  .typed-line,
+  .status-line {
+    opacity: 0;
+    transform: translateY(6px);
+    transition:
+      opacity var(--dur-md) var(--ease-out),
+      transform var(--dur-md) var(--ease-out);
+  }
+
+  .typed-line.visible,
+  .status-line.visible,
+  .welcome-card.visible,
+  .workspace-chat.visible,
+  .prompt-row.visible,
+  .tool-card.visible,
+  .tenant-card.visible,
+  .instance-card.visible,
+  .metric.visible,
+  .console-counter.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .terminal-prompt {
+    color: #8ea8ff;
+  }
+
+  .terminal-ok {
+    color: #c7dd6b;
+  }
+
+  .cursor {
+    display: inline-block;
+    width: 10px;
+    height: 22px;
+    margin-left: 2px;
+    background: #7a8dfb;
+    vertical-align: middle;
+    animation: blink 1s step-end infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 0.8; }
+    50% { opacity: 0; }
+  }
+
+  .workspace-layout {
+    display: grid;
+    gap: 18px;
+  }
+
+  .workspace-card {
+    position: relative;
+    min-height: 486px;
+    padding: 30px 32px;
+    border-radius: 28px;
+    background: linear-gradient(180deg, rgba(8, 8, 10, 0.96), rgba(6, 6, 8, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .workspace-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 18% 12%, rgba(221, 177, 92, 0.10), transparent 22%),
+      radial-gradient(circle at 84% 18%, rgba(137, 168, 255, 0.10), transparent 18%);
+    pointer-events: none;
+  }
+
+  .workspace-head {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+  }
+
+  .workspace-brand {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .workspace-brand strong {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 20px;
+    letter-spacing: -0.02em;
+  }
+
+  .workspace-brand span {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  .workspace-pill {
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-soft);
+    font-size: 12px;
+  }
+
+  .welcome-card {
+    position: relative;
+    z-index: 2;
+    opacity: 0;
+    transform: translateY(8px);
+    transition:
+      opacity var(--dur-md) var(--ease-out),
+      transform var(--dur-md) var(--ease-out);
+    padding: 24px 28px;
+    border-radius: 26px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  .welcome-card h2 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 46px;
+    letter-spacing: -0.04em;
+    margin-bottom: 14px;
+  }
+
+  .welcome-card p {
+    font-size: 17px;
+    color: var(--text-soft);
+    line-height: 1.6;
+    max-width: 600px;
+  }
+
+  .welcome-meta {
+    display: flex;
+    gap: 24px;
+    margin-top: 22px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  .workspace-chat,
+  .prompt-row,
+  .tool-card {
+    position: relative;
+    z-index: 2;
+    opacity: 0;
+    transform: translateY(8px);
+    transition:
+      opacity var(--dur-md) var(--ease-out),
+      transform var(--dur-md) var(--ease-out);
+  }
+
+  .workspace-chat {
+    margin-top: 18px;
+    padding: 18px 20px;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.025);
+    display: grid;
+    gap: 12px;
+  }
+
+  .bubble {
+    max-width: 78%;
+    padding: 12px 14px;
+    border-radius: 16px;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  .bubble.user {
+    justify-self: end;
+    color: #fff;
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .bubble.agent {
+    color: var(--text-soft);
+    background: rgba(137, 168, 255, 0.09);
+    border: 1px solid rgba(137, 168, 255, 0.16);
+  }
+
+  .prompt-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 18px;
+    padding: 18px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 16px;
+  }
+
+  .prompt-arrow {
+    color: var(--text-dim);
+    font-size: 24px;
+    line-height: 1;
+  }
+
+  .prompt-text {
+    color: #fff;
+  }
+
+  .tool-card {
+    margin-top: 10px;
+    padding: 18px 20px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .tool-label {
+    margin-bottom: 10px;
+    font-size: 15px;
+    color: #c9b6ff;
+  }
+
+  .tool-output {
+    display: grid;
+    gap: 10px;
+    color: var(--text-soft);
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  .tool-link {
+    color: var(--accent-gold);
+  }
+
+  .tool-success {
+    color: var(--accent-green);
+  }
+
+  .topology-stage {
+    position: absolute;
+    inset: 90px 80px 84px;
+    z-index: 18;
+    transform: scale(0.985);
+  }
+
+  .topology-stage.visible {
+    transform: scale(1);
+  }
+
+  .mesh {
+    position: absolute;
+    inset: 0;
+  }
+
+  .mesh line {
+    stroke: rgba(255, 255, 255, 0.12);
+    stroke-width: 1;
+  }
+
+  .hub {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 224px;
+    padding: 24px;
+    border-radius: 26px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    text-align: center;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.34);
+  }
+
+  .hub-mark {
+    display: grid;
+    place-items: center;
+    width: 62px;
+    height: 62px;
+    margin: 0 auto 14px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--accent);
+  }
+
+  .hub-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 26px;
+    letter-spacing: -0.03em;
+    margin-bottom: 6px;
+  }
+
+  .hub-copy {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+
+  .tenant-card {
+    position: absolute;
+    width: 230px;
+    padding: 16px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
+    opacity: 0;
+    transform: translateY(10px);
+    transition:
+      opacity var(--dur-md) var(--ease-out),
+      transform var(--dur-md) var(--ease-out),
+      border-color var(--dur-md) ease;
+  }
+
+  .tenant-card.live {
+    border-color: rgba(116, 216, 154, 0.22);
+  }
+
+  .tenant-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+
+  .tenant-head strong {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 15px;
+  }
+
+  .tenant-head span {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-dim);
+  }
+
+  .tenant-copy {
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text-soft);
+  }
+
+  .tenant-status {
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--accent-green);
+  }
+
+  .card-acme { top: 16px; left: 16px; }
+  .card-finance { top: 0; right: 54px; }
+  .card-people { top: 248px; left: 0; }
+  .card-advisory { top: 252px; right: 0; }
+  .card-eu { bottom: 0; left: 130px; }
+  .card-ops { bottom: 12px; right: 160px; }
+
+  .console-card {
+    position: relative;
+    min-height: 532px;
+    border-radius: 28px;
+    background: linear-gradient(180deg, rgba(8, 8, 10, 0.97), rgba(6, 6, 8, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+
+  .console-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 24%),
+      radial-gradient(circle at top right, rgba(221, 177, 92, 0.08), transparent 20%);
+    pointer-events: none;
+  }
+
+  .console-head {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 24px 26px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .console-head strong {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 22px;
+    letter-spacing: -0.03em;
+  }
+
+  .console-head span {
+    display: block;
+    margin-top: 6px;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+
+  .console-badge {
+    padding: 9px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-soft);
+    font-size: 12px;
+  }
+
+  .console-body {
+    position: relative;
+    z-index: 2;
+    padding: 22px 26px 26px;
+  }
+
+  .metric-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .metric {
+    padding: 16px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.025);
+    opacity: 0;
+    transform: translateY(8px);
+    transition:
+      opacity var(--dur-md) var(--ease-out),
+      transform var(--dur-md) var(--ease-out);
+  }
+
+  .metric-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+
+  .metric-value {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 26px;
+    letter-spacing: -0.04em;
+  }
+
+  .metric-note {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-soft);
+  }
+
+  .instance-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .instance-card {
+    padding: 16px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.025);
+    opacity: 0;
+    transform: translateY(8px);
+    transition:
+      opacity var(--dur-md) var(--ease-out),
+      transform var(--dur-md) var(--ease-out),
+      border-color var(--dur-md) ease;
+  }
+
+  .instance-card.live {
+    border-color: rgba(116, 216, 154, 0.22);
+    background: rgba(116, 216, 154, 0.04);
+  }
+
+  .instance-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .instance-top strong {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 15px;
+  }
+
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-green);
+    box-shadow: 0 0 12px rgba(116, 216, 154, 0.65);
+  }
+
+  .instance-type {
+    display: inline-block;
+    margin-bottom: 10px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-dim);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .instance-meta {
+    font-size: 12px;
+    line-height: 1.8;
+    color: var(--text-soft);
+  }
+
+  .console-counter {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-top: 18px;
+    padding: 12px 16px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.025);
+    opacity: 0;
+    transform: translateY(8px);
+    transition:
+      opacity var(--dur-md) var(--ease-out),
+      transform var(--dur-md) var(--ease-out);
+  }
+
+  .counter-number {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 42px;
+    letter-spacing: -0.05em;
+    line-height: 1;
+  }
+
+  .counter-copy {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+  }
+
+  .closing-copy {
+    position: absolute;
+    inset: 0;
+    z-index: 26;
+    display: grid;
+    place-items: center;
+    text-align: center;
+  }
+
+  .closing-copy .wrap {
+    max-width: 840px;
+  }
+
+  .closing-copy h2 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: clamp(40px, 5vw, 66px);
+    line-height: 0.98;
+    letter-spacing: -0.05em;
+    margin-bottom: 14px;
+  }
+
+  .closing-copy p {
+    font-size: 17px;
+    line-height: 1.8;
+    color: var(--text-soft);
+    margin-bottom: 24px;
+  }
+
+  .badge-row {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .badge {
+    padding: 9px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-soft);
+    font-size: 11px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .logo-center {
+    position: absolute;
+    inset: 0;
+    z-index: 28;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    transform: scale(0.985);
+  }
+
+  .logo-center.visible {
+    transform: scale(1);
+  }
+
+  .logo-center .stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .logo-center svg {
+    width: 64px;
+    height: 64px;
+  }
+
+  .logo-center .wordmark {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="scene">
+  <div class="grid"></div>
+  <div class="grain"></div>
+  <div class="vignette"></div>
+  <div class="halo" id="halo"></div>
+
+  <div class="logo-corner" id="logoCorner">
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="2" y="4" width="20" height="16" rx="2" stroke="currentColor" stroke-width="2"></rect>
+      <path d="M12 7.5L12.8 9.8L15 10.5L12.8 11.2L12 13.5L11.2 11.2L9 10.5L11.2 9.8L12 7.5Z" fill="currentColor" opacity="0.35"></path>
+      <path d="M8 10L8.5 8.5L10 8L8.5 7.5L8 6L7.5 7.5L6 8L7.5 8.5L8 10Z" fill="currentColor"></path>
+      <path d="M16 10L16.5 8.5L18 8L16.5 7.5L16 6L15.5 7.5L14 8L15.5 8.5L16 10Z" fill="currentColor"></path>
+      <path d="M8 14C8 14 10 16 12 16C14 16 16 14 16 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+    </svg>
+    Starpod<span>.sh</span>
+  </div>
+
+  <div class="title-card" id="titleCard">
+    <div class="inner">
+      <h1 id="titleText">Introducing</h1>
+      <div class="subtle" id="titleSub"></div>
+    </div>
+  </div>
+
+  <div class="install-stage" id="installStage">
+    <div class="panel-shell">
+      <div class="terminal-window">
+        <div class="terminal-top">
+          <div class="dot red"></div>
+          <div class="dot yellow"></div>
+          <div class="dot green"></div>
+          <div class="terminal-name">terminal</div>
+        </div>
+        <div class="terminal-body">
+          <div class="typed-line" id="installCommand"></div>
+          <div class="status-line" id="installStatus"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="workspace-stage" id="workspaceStage">
+    <div class="workspace-card">
+      <div class="workspace-head">
+        <div class="workspace-brand">
+          <strong>Starpod Console</strong>
+          <span>support-agent · us-east-1</span>
+        </div>
+        <div class="workspace-pill">Open source · Rust</div>
+      </div>
+
+      <div class="welcome-card" id="welcomeCard">
+        <h2>One great<br>AI agent.</h2>
+        <p>It remembers context, talks to you, and feels almost too easy to ship.</p>
+        <div class="welcome-meta">
+          <div>Memory</div>
+          <div>Telegram</div>
+          <div>Vault</div>
+        </div>
+      </div>
+
+      <div class="workspace-chat" id="workspaceChat">
+        <div class="bubble user">Summarize new client filings and ping me on Telegram.</div>
+        <div class="bubble agent">Done. I will remember what matters and keep the thread alive.</div>
+      </div>
+
+      <div class="prompt-row" id="promptRow">
+        <div class="prompt-arrow">&gt;</div>
+        <div class="prompt-text" id="promptText"></div>
+      </div>
+
+      <div class="tool-card" id="toolCard">
+        <div class="tool-label">What happens next?</div>
+        <div class="tool-output">
+          <div>Now the whole team wants the same experience.</div>
+          <div>Then every client. Then every business unit.</div>
+          <div class="tool-success">That is the deployment problem Starpod solves.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="topology-stage" id="topologyStage">
+    <svg class="mesh" viewBox="0 0 1040 500" preserveAspectRatio="none" aria-hidden="true">
+      <line x1="180" y1="88" x2="520" y2="250"></line>
+      <line x1="844" y1="72" x2="520" y2="250"></line>
+      <line x1="120" y1="320" x2="520" y2="250"></line>
+      <line x1="914" y1="322" x2="520" y2="250"></line>
+      <line x1="286" y1="462" x2="520" y2="250"></line>
+      <line x1="762" y1="470" x2="520" y2="250"></line>
+    </svg>
+
+    <div class="hub">
+      <div class="hub-mark">
+        <svg viewBox="0 0 24 24" fill="none" width="30" height="30" aria-hidden="true">
+          <rect x="2" y="4" width="20" height="16" rx="2" stroke="currentColor" stroke-width="1.8"></rect>
+          <path d="M12 7.5L12.8 9.8L15 10.5L12.8 11.2L12 13.5L11.2 11.2L9 10.5L11.2 9.8L12 7.5Z" fill="currentColor" opacity="0.35"></path>
+          <path d="M8 14C8 14 10 16 12 16C14 16 16 14 16 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path>
+        </svg>
+      </div>
+      <div class="hub-title">support-agent</div>
+      <div class="hub-copy">One definition for behavior, tools, channels, and guardrails.</div>
+    </div>
+
+    <div class="tenant-card card-acme">
+      <div class="tenant-head"><strong>Acme Capital</strong><span>client</span></div>
+      <div class="tenant-copy">Private compliance agent with its own vault, files, and audit history.</div>
+      <div class="tenant-status">isolated memory active</div>
+    </div>
+
+    <div class="tenant-card card-finance">
+      <div class="tenant-head"><strong>Finance Ops</strong><span>team</span></div>
+      <div class="tenant-copy">Internal agent for approvals, recurring workflows, and staff support.</div>
+      <div class="tenant-status">credentials scoped</div>
+    </div>
+
+    <div class="tenant-card card-people">
+      <div class="tenant-head"><strong>People Team</strong><span>business unit</span></div>
+      <div class="tenant-copy">Separate memory and conversations for onboarding, policy, and benefits.</div>
+      <div class="tenant-status">session boundary locked</div>
+    </div>
+
+    <div class="tenant-card card-advisory">
+      <div class="tenant-head"><strong>Wayne Advisory</strong><span>client</span></div>
+      <div class="tenant-copy">Client-facing agent with dedicated channels and tenant-specific instructions.</div>
+      <div class="tenant-status">filesystem isolated</div>
+    </div>
+
+    <div class="tenant-card card-eu">
+      <div class="tenant-head"><strong>EU Ops</strong><span>region</span></div>
+      <div class="tenant-copy">Shared blueprint, separate deployment surface, no tenant cross-contamination.</div>
+      <div class="tenant-status">private runtime ready</div>
+    </div>
+
+    <div class="tenant-card card-ops">
+      <div class="tenant-head"><strong>Sales Team</strong><span>team</span></div>
+      <div class="tenant-copy">Private outbound assistant with per-team memory and isolated credentials.</div>
+      <div class="tenant-status">channels connected</div>
+    </div>
+  </div>
+
+  <div class="console-stage" id="consoleStage">
+    <div class="console-card">
+      <div class="console-head">
+        <div>
+          <strong>support-agent</strong>
+          <span>Define once. Deploy isolated agents for everyone.</span>
+        </div>
+        <div class="console-badge">AWS / GCP / Azure</div>
+      </div>
+
+      <div class="console-body">
+        <div class="metric-row">
+          <div class="metric">
+            <div class="metric-label">Isolation</div>
+            <div class="metric-value">Memory + Vault</div>
+            <div class="metric-note">Per tenant. No shared state.</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Deployment</div>
+            <div class="metric-value">Minutes</div>
+            <div class="metric-note">No repo cloning. No custom infra tree.</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Runtime</div>
+            <div class="metric-value">Rust</div>
+            <div class="metric-note">Open source production layer for AI agents.</div>
+          </div>
+        </div>
+
+        <div class="instance-grid" id="instanceGrid">
+          <div class="instance-card">
+            <div class="instance-top"><strong>Acme Capital</strong><div class="live-dot"></div></div>
+            <div class="instance-type">client</div>
+            <div class="instance-meta">Memory<br>Vault<br>Files<br>Email + Telegram</div>
+          </div>
+          <div class="instance-card">
+            <div class="instance-top"><strong>Finance Ops</strong><div class="live-dot"></div></div>
+            <div class="instance-type">team</div>
+            <div class="instance-meta">Memory<br>Vault<br>Files<br>Web UI + API</div>
+          </div>
+          <div class="instance-card">
+            <div class="instance-top"><strong>People Team</strong><div class="live-dot"></div></div>
+            <div class="instance-type">business unit</div>
+            <div class="instance-meta">Memory<br>Vault<br>Files<br>Slack + Email</div>
+          </div>
+          <div class="instance-card">
+            <div class="instance-top"><strong>Wayne Advisory</strong><div class="live-dot"></div></div>
+            <div class="instance-type">client</div>
+            <div class="instance-meta">Memory<br>Vault<br>Files<br>WhatsApp + API</div>
+          </div>
+          <div class="instance-card">
+            <div class="instance-top"><strong>EU Ops</strong><div class="live-dot"></div></div>
+            <div class="instance-type">region</div>
+            <div class="instance-meta">Memory<br>Vault<br>Files<br>Web UI + Email</div>
+          </div>
+          <div class="instance-card">
+            <div class="instance-top"><strong>Sales Team</strong><div class="live-dot"></div></div>
+            <div class="instance-type">team</div>
+            <div class="instance-meta">Memory<br>Vault<br>Files<br>Telegram + API</div>
+          </div>
+        </div>
+
+        <div class="console-counter" id="consoleCounter">
+          <div class="counter-number" id="counterNumber">0</div>
+          <div class="counter-copy">isolated instances deployed</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="closing-copy" id="closingCopy">
+    <div class="wrap">
+      <h2>The production layer<br>for AI agents</h2>
+      <p>Give every client, employee, and business unit their own fully isolated, fully private AI agent, deployed in minutes.</p>
+      <div class="badge-row">
+        <div class="badge">Fully Isolated</div>
+        <div class="badge">Fully Private</div>
+        <div class="badge">Open Source</div>
+        <div class="badge">Built In Rust</div>
+        <div class="badge">AWS</div>
+        <div class="badge">GCP</div>
+        <div class="badge">Azure</div>
+        <div class="badge">starpod.sh</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="logo-center" id="logoCenter">
+    <div class="stack">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="2" y="4" width="20" height="16" rx="2" stroke="currentColor" stroke-width="2"></rect>
+        <path d="M12 7.5L12.8 9.8L15 10.5L12.8 11.2L12 13.5L11.2 11.2L9 10.5L11.2 9.8L12 7.5Z" fill="currentColor" opacity="0.35"></path>
+        <path d="M8 10L8.5 8.5L10 8L8.5 7.5L8 6L7.5 7.5L6 8L7.5 8.5L8 10Z" fill="currentColor"></path>
+        <path d="M16 10L16.5 8.5L18 8L16.5 7.5L16 6L15.5 7.5L14 8L15.5 8.5L16 10Z" fill="currentColor"></path>
+        <path d="M8 14C8 14 10 16 12 16C14 16 16 14 16 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+      </svg>
+      <div class="wordmark">Starpod<span>.sh</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+let paused = false;
+document.addEventListener('visibilitychange', () => {
+  paused = document.hidden;
+});
+
+const safeSleep = (ms) => new Promise((resolve) => {
+  const check = () => {
+    if (paused) {
+      setTimeout(check, 120);
+      return;
+    }
+    setTimeout(resolve, ms);
+  };
+  check();
+});
+
+const titleCard = document.getElementById('titleCard');
+const titleText = document.getElementById('titleText');
+const titleSub = document.getElementById('titleSub');
+const halo = document.getElementById('halo');
+const logoCorner = document.getElementById('logoCorner');
+const installStage = document.getElementById('installStage');
+const workspaceStage = document.getElementById('workspaceStage');
+const workspaceChat = document.getElementById('workspaceChat');
+const welcomeCard = document.getElementById('welcomeCard');
+const promptRow = document.getElementById('promptRow');
+const promptText = document.getElementById('promptText');
+const toolCard = document.getElementById('toolCard');
+const topologyStage = document.getElementById('topologyStage');
+const consoleStage = document.getElementById('consoleStage');
+const closingCopy = document.getElementById('closingCopy');
+const logoCenter = document.getElementById('logoCenter');
+const installCommand = document.getElementById('installCommand');
+const installStatus = document.getElementById('installStatus');
+const metrics = [...document.querySelectorAll('.metric')];
+const tenantCards = [...document.querySelectorAll('.tenant-card')];
+const instanceCards = [...document.querySelectorAll('.instance-card')];
+const consoleCounter = document.getElementById('consoleCounter');
+const counterNumber = document.getElementById('counterNumber');
+
+function resetStage() {
+  [
+    titleCard,
+    halo,
+    logoCorner,
+    installStage,
+    workspaceStage,
+    welcomeCard,
+    workspaceChat,
+    promptRow,
+    toolCard,
+    topologyStage,
+    consoleStage,
+    closingCopy,
+    logoCenter,
+    consoleCounter
+  ].forEach((el) => el.classList.remove('visible', 'exit', 'compact'));
+
+  tenantCards.forEach((card) => card.classList.remove('visible', 'live'));
+  metrics.forEach((metric) => metric.classList.remove('visible'));
+  instanceCards.forEach((card) => card.classList.remove('visible', 'live'));
+
+  installCommand.classList.remove('visible');
+  installStatus.classList.remove('visible');
+  installStatus.classList.remove('terminal-ok');
+  installCommand.innerHTML = '';
+  installStatus.textContent = '';
+  promptText.textContent = '';
+  counterNumber.textContent = '0';
+  titleText.textContent = 'Introducing';
+  titleSub.textContent = '';
+}
+
+async function typeText(el, text, speed = 34, withCursor = false) {
+  el.innerHTML = '';
+  if (withCursor) {
+    el.innerHTML = '<span class="cursor"></span>';
+  }
+
+  for (let i = 0; i < text.length; i += 1) {
+    const content = text.slice(0, i + 1);
+    el.innerHTML = withCursor ? `${content}<span class="cursor"></span>` : content;
+    await safeSleep(speed);
+  }
+}
+
+async function typeTerminalCommand(el, prompt, command, speed = 40) {
+  for (let i = 0; i < command.length; i += 1) {
+    const content = command.slice(0, i + 1);
+    el.innerHTML = `<span class="terminal-prompt">${prompt}</span> ${content}`;
+    await safeSleep(speed);
+  }
+}
+
+async function showTitle(text, opts = {}) {
+  const { sub = '', compact = false, hold = 1050 } = opts;
+  titleCard.classList.remove('exit', 'compact');
+  if (compact) titleCard.classList.add('compact');
+  titleText.innerHTML = text;
+  titleSub.textContent = sub;
+  await safeSleep(30);
+  titleCard.classList.add('visible');
+  await safeSleep(hold);
+}
+
+async function hideTitle() {
+  titleCard.classList.add('exit');
+  await safeSleep(320);
+  titleCard.classList.remove('visible', 'exit', 'compact');
+}
+
+async function animateCounter(to, duration) {
+  return new Promise((resolve) => {
+    const from = 0;
+    const start = performance.now();
+
+    function frame(now) {
+      const progress = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      counterNumber.textContent = String(Math.round(from + (to - from) * eased));
+      if (progress < 1) {
+        requestAnimationFrame(frame);
+      } else {
+        resolve();
+      }
+    }
+
+    requestAnimationFrame(frame);
+  });
+}
+
+async function intro() {
+  await showTitle('Your first AI agent<br>feels magical.', { compact: true, hold: 1450 });
+  await hideTitle();
+  await safeSleep(120);
+  await showTitle('Deploying that magic<br>for everyone is not.', { compact: true, hold: 1650 });
+  await hideTitle();
+}
+
+async function installBeat() {
+  halo.classList.add('visible');
+  logoCorner.classList.add('visible');
+  installStage.classList.add('visible');
+  await safeSleep(260);
+  installCommand.classList.add('visible');
+  await typeTerminalCommand(installCommand, '~&gt;', 'cargo install starpod', 42);
+  await safeSleep(220);
+  installStatus.textContent = '✓ Starpod CLI installed';
+  installStatus.classList.add('visible');
+  installStatus.classList.add('terminal-ok');
+  await safeSleep(1050);
+  installStage.classList.add('exit');
+  await safeSleep(340);
+  installStage.classList.remove('visible', 'exit');
+}
+
+async function workspaceBeat() {
+  workspaceStage.classList.add('visible');
+  await safeSleep(220);
+  welcomeCard.classList.add('visible');
+  await safeSleep(720);
+  workspaceChat.classList.add('visible');
+  await safeSleep(820);
+  promptRow.classList.add('visible');
+  await typeText(promptText, 'now give every client their own', 34, true);
+  await safeSleep(280);
+  toolCard.classList.add('visible');
+  await safeSleep(1500);
+  workspaceStage.classList.add('exit');
+  await safeSleep(340);
+  workspaceStage.classList.remove('visible', 'exit');
+}
+
+async function topologyBeat() {
+  topologyStage.classList.add('visible');
+  await safeSleep(240);
+
+  for (const card of tenantCards) {
+    card.classList.add('visible');
+    await safeSleep(120);
+    card.classList.add('live');
+  }
+
+  await safeSleep(1180);
+  topologyStage.classList.add('exit');
+  await safeSleep(340);
+  topologyStage.classList.remove('visible', 'exit');
+}
+
+async function consoleBeat() {
+  consoleStage.classList.add('visible');
+  await safeSleep(220);
+
+  for (const metric of metrics) {
+    metric.classList.add('visible');
+    await safeSleep(120);
+  }
+
+  await safeSleep(100);
+  let visibleCount = 0;
+  for (const card of instanceCards) {
+    card.classList.add('visible');
+    await safeSleep(90);
+    card.classList.add('live');
+    visibleCount += 1;
+  }
+
+  consoleCounter.classList.add('visible');
+  await animateCounter(48, 1400);
+  await safeSleep(920);
+  consoleStage.classList.add('exit');
+  await safeSleep(420);
+  consoleStage.classList.remove('visible', 'exit');
+}
+
+async function architectureRun() {
+  await showTitle('Clients.<br>Employees.<br>Business units.', { compact: true, hold: 1180 });
+  await hideTitle();
+  await safeSleep(80);
+  await showTitle('Same agent.<br>Separate everything.', { compact: true, hold: 1320 });
+  await hideTitle();
+}
+
+async function deployRun() {
+  await showTitle('Define once.<br>Deploy isolated agents for everyone.', { compact: true, hold: 1450, sub: 'fully isolated · fully private · deployed in minutes' });
+  await hideTitle();
+}
+
+async function painRun() {
+  await showTitle('No cloned repos.', { compact: true, hold: 900 });
+  await hideTitle();
+  await safeSleep(60);
+  await showTitle('No per-tenant infra.', { compact: true, hold: 950 });
+  await hideTitle();
+  await safeSleep(60);
+  await showTitle('No microservices<br>nobody asked for.', { compact: true, hold: 1150 });
+  await hideTitle();
+}
+
+async function finale() {
+  closingCopy.classList.add('visible');
+  await safeSleep(2650);
+  closingCopy.classList.add('exit');
+  await safeSleep(460);
+  closingCopy.classList.remove('visible', 'exit');
+
+  logoCorner.classList.remove('visible');
+  halo.classList.remove('visible');
+  logoCenter.classList.add('visible');
+  await safeSleep(1800);
+  logoCenter.classList.add('exit');
+  await safeSleep(420);
+  logoCenter.classList.remove('visible', 'exit');
+}
+
+async function run() {
+  resetStage();
+  await safeSleep(240);
+  await intro();
+  await installBeat();
+  await workspaceBeat();
+  await architectureRun();
+  await topologyBeat();
+  await deployRun();
+  await consoleBeat();
+  await painRun();
+  await finale();
+  run();
+}
+
+run();
+</script>
+</body>
+</html>
