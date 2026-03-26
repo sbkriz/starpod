@@ -99,15 +99,19 @@ impl MemoryStore {
         std::fs::create_dir_all(db_dir)
             .map_err(StarpodError::Io)?;
 
-        // Open SQLite pool
+        // Open SQLite pool — 2 connections (one writer + one reader).
+        // SQLite serialises writes, so extra connections only waste memory.
         let db_path = db_dir.join("memory.db");
         let opts = SqliteConnectOptions::from_str(
             &format!("sqlite://{}?mode=rwc", db_path.display()),
         )
-        .map_err(|e| StarpodError::Database(format!("Invalid DB path: {}", e)))?;
+        .map_err(|e| StarpodError::Database(format!("Invalid DB path: {}", e)))?
+        .pragma("journal_mode", "WAL")
+        .pragma("busy_timeout", "5000")
+        .pragma("synchronous", "NORMAL");
 
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(2)
             .connect_with(opts)
             .await
             .map_err(|e| StarpodError::Database(format!("Failed to open database: {}", e)))?;

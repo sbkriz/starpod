@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! ┌──────────┐
-//! │  CoreDb   │  owns SqlitePool (max 10 conns, WAL, FK ON)
+//! │  CoreDb   │  owns SqlitePool (max 2 conns, WAL, FK ON)
 //! └────┬─────┘
 //!      │ pool.clone()
 //!      ├──────────────► SessionManager::from_pool(pool)
@@ -51,7 +51,13 @@ use starpod_core::{StarpodError, Result};
 /// The pool is configured with:
 /// - **WAL journal mode** — concurrent readers don't block writers
 /// - **Foreign keys ON** — referential integrity across all tables
-/// - **10 max connections** — shared across all stores
+/// - **2 max connections** — one writer + one reader; SQLite serialises
+///   writes anyway, so more connections just waste memory (~2 MB page
+///   cache each) and cause lock contention on small VMs
+/// - **`busy_timeout = 5000`** — wait up to 5 s for a lock instead of
+///   returning SQLITE_BUSY immediately
+/// - **`synchronous = NORMAL`** — safe with WAL, avoids fsync per commit
+/// - **`cache_size = -2000`** — 2 MB page cache per connection (default)
 pub struct CoreDb {
     pool: SqlitePool,
 }
@@ -105,10 +111,12 @@ impl CoreDb {
         )
         .map_err(|e| StarpodError::Database(format!("Invalid DB path: {}", e)))?
         .pragma("journal_mode", "WAL")
-        .pragma("foreign_keys", "ON");
+        .pragma("foreign_keys", "ON")
+        .pragma("busy_timeout", "5000")
+        .pragma("synchronous", "NORMAL");
 
         let pool = SqlitePoolOptions::new()
-            .max_connections(10)
+            .max_connections(2)
             .connect_with(opts)
             .await
             .map_err(|e| StarpodError::Database(format!("Failed to open core db: {}", e)))?;

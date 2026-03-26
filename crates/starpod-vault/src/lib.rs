@@ -79,10 +79,13 @@ impl Vault {
         let opts = SqliteConnectOptions::from_str(
             &format!("sqlite://{}?mode=rwc", db_path.display()),
         )
-        .map_err(|e| StarpodError::Database(format!("Invalid DB path: {}", e)))?;
+        .map_err(|e| StarpodError::Database(format!("Invalid DB path: {}", e)))?
+        .pragma("journal_mode", "WAL")
+        .pragma("busy_timeout", "5000")
+        .pragma("synchronous", "NORMAL");
 
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(1)
             .connect_with(opts)
             .await
             .map_err(|e| StarpodError::Database(format!("Failed to open vault db: {}", e)))?;
