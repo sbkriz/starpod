@@ -1950,4 +1950,65 @@ mod tests {
         assert_eq!(config.provider_options("openai")["seed"], 42);
         assert!(config.provider_options("anthropic").is_empty());
     }
+
+    // ── Bedrock provider tests ──────────────────────────────────────────
+
+    #[test]
+    fn resolved_provider_api_key_bedrock_from_env() {
+        std::env::set_var("AWS_ACCESS_KEY_ID", "AKIATEST12345");
+        let config = StarpodConfig::default();
+        assert_eq!(
+            config.resolved_provider_api_key("bedrock"),
+            Some("AKIATEST12345".to_string())
+        );
+        std::env::remove_var("AWS_ACCESS_KEY_ID");
+    }
+
+    #[test]
+    fn resolved_provider_base_url_bedrock_default() {
+        let config = StarpodConfig::default();
+        assert_eq!(
+            config.resolved_provider_base_url("bedrock"),
+            Some("https://bedrock-runtime.us-east-1.amazonaws.com".to_string())
+        );
+    }
+
+    #[test]
+    fn resolved_provider_base_url_bedrock_config_override() {
+        let toml = r#"
+            [providers.bedrock]
+            base_url = "https://bedrock-runtime.eu-west-1.amazonaws.com"
+        "#;
+        let config: StarpodConfig = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.resolved_provider_base_url("bedrock"),
+            Some("https://bedrock-runtime.eu-west-1.amazonaws.com".to_string())
+        );
+    }
+
+    #[test]
+    fn provider_options_bedrock_region() {
+        let toml = r#"
+            [providers.bedrock.options]
+            region = "eu-west-1"
+        "#;
+        let config: StarpodConfig = toml::from_str(toml).unwrap();
+        let opts = config.provider_options("bedrock");
+        assert_eq!(opts.len(), 1);
+        assert_eq!(opts["region"], "eu-west-1");
+    }
+
+    #[test]
+    fn bedrock_provider_config_deserialization() {
+        let toml = r#"
+            [providers.bedrock]
+            enabled = true
+            [providers.bedrock.options]
+            region = "us-east-1"
+        "#;
+        let config: StarpodConfig = toml::from_str(toml).unwrap();
+        let bedrock = config.providers.bedrock.as_ref().unwrap();
+        assert!(bedrock.enabled);
+        assert_eq!(bedrock.options["region"], "us-east-1");
+    }
 }

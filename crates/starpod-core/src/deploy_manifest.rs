@@ -954,4 +954,70 @@ mod tests {
         assert!(merged.agent.variables.contains_key("DEBUG"));
         assert_eq!(merged.agent.variables["DEBUG"].default.as_deref(), Some("true"));
     }
+
+    // ── Bedrock provider tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_bedrock_provider_generates_aws_credentials() {
+        let config = AgentConfigInput {
+            models: vec!["bedrock/eu.anthropic.claude-sonnet-4-6".to_string()],
+            telegram_enabled: false,
+            internet_enabled: false,
+        };
+        let manifest = DeployManifest::generate(&config, vec![]);
+        assert!(manifest.agent.secrets.contains_key("AWS_ACCESS_KEY_ID"));
+        assert!(manifest.agent.secrets.contains_key("AWS_SECRET_ACCESS_KEY"));
+        assert!(manifest.agent.secrets["AWS_ACCESS_KEY_ID"].required);
+        assert!(manifest.agent.secrets["AWS_SECRET_ACCESS_KEY"].required);
+        // Should NOT contain a BEDROCK_API_KEY
+        assert!(!manifest.agent.secrets.contains_key("BEDROCK_API_KEY"));
+    }
+
+    #[test]
+    fn test_bedrock_provider_no_duplicate_aws_keys() {
+        let config = AgentConfigInput {
+            models: vec![
+                "bedrock/eu.anthropic.claude-sonnet-4-6".to_string(),
+                "bedrock/us.anthropic.claude-opus-4-6-v1".to_string(),
+            ],
+            telegram_enabled: false,
+            internet_enabled: false,
+        };
+        let manifest = DeployManifest::generate(&config, vec![]);
+        // Only 2 secrets (the AWS credential pair), not duplicated
+        assert_eq!(manifest.agent.secrets.len(), 2);
+        assert!(manifest.agent.secrets.contains_key("AWS_ACCESS_KEY_ID"));
+        assert!(manifest.agent.secrets.contains_key("AWS_SECRET_ACCESS_KEY"));
+    }
+
+    #[test]
+    fn test_bedrock_mixed_with_other_providers() {
+        let config = AgentConfigInput {
+            models: vec![
+                "bedrock/eu.anthropic.claude-sonnet-4-6".to_string(),
+                "anthropic/claude-haiku-4-5".to_string(),
+            ],
+            telegram_enabled: false,
+            internet_enabled: false,
+        };
+        let manifest = DeployManifest::generate(&config, vec![]);
+        assert!(manifest.agent.secrets.contains_key("AWS_ACCESS_KEY_ID"));
+        assert!(manifest.agent.secrets.contains_key("AWS_SECRET_ACCESS_KEY"));
+        assert!(manifest.agent.secrets.contains_key("ANTHROPIC_API_KEY"));
+        assert_eq!(manifest.agent.secrets.len(), 3);
+    }
+
+    #[test]
+    fn test_bedrock_toml_output_contains_aws_keys() {
+        let config = AgentConfigInput {
+            models: vec!["bedrock/eu.anthropic.claude-sonnet-4-6".to_string()],
+            telegram_enabled: false,
+            internet_enabled: false,
+        };
+        let manifest = DeployManifest::generate(&config, vec![]);
+        let toml = manifest.to_toml().unwrap();
+        assert!(toml.contains("[agent.secrets.AWS_ACCESS_KEY_ID]"));
+        assert!(toml.contains("[agent.secrets.AWS_SECRET_ACCESS_KEY]"));
+        assert!(!toml.contains("BEDROCK_API_KEY"));
+    }
 }

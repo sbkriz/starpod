@@ -31,7 +31,8 @@ The SDK supports multiple LLM providers via the `LlmProvider` trait. Each provid
 
 | Provider | Struct | Also Serves |
 |----------|--------|-------------|
-| Anthropic | `AnthropicProvider` | Bedrock, Vertex (via env vars) |
+| Anthropic | `AnthropicProvider` | — |
+| AWS Bedrock | `BedrockProvider` | — |
 | OpenAI | `OpenAiProvider` | Groq, DeepSeek, OpenRouter, Ollama |
 | Gemini | `GeminiProvider` | — |
 
@@ -50,6 +51,25 @@ let stream = query(
         .build(),
 );
 ```
+
+### Using AWS Bedrock
+
+```rust
+use agent_sdk::{Options, BedrockProvider};
+
+// Reads AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION from env
+let provider = BedrockProvider::with_region("eu-west-1");
+
+let stream = query(
+    "Hello!",
+    Options::builder()
+        .provider(Box::new(provider))
+        .model("eu.anthropic.claude-sonnet-4-6")
+        .build(),
+);
+```
+
+Bedrock uses AWS SigV4 authentication and the AWS Event Stream binary protocol for streaming. Model IDs use cross-region inference profiles (e.g. `eu.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-opus-4-6-v1`).
 
 If no provider is set, defaults to `AnthropicProvider::from_env()`.
 

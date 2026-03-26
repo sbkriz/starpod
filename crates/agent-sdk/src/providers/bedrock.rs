@@ -678,4 +678,370 @@ mod tests {
         let d100 = provider.backoff_duration(100);
         assert!(d100 <= provider.retry_config.max_backoff);
     }
+
+    #[test]
+    fn provider_name_is_bedrock() {
+        let provider = BedrockProvider::new("AKIATEST", "secret", None, "us-east-1");
+        assert_eq!(provider.name(), "bedrock");
+    }
+
+    #[test]
+    fn capabilities_all_enabled() {
+        let provider = BedrockProvider::new("AKIATEST", "secret", None, "us-east-1");
+        let caps = provider.capabilities();
+        assert!(caps.streaming);
+        assert!(caps.tool_use);
+        assert!(caps.thinking);
+        assert!(caps.prompt_caching);
+    }
+
+    #[test]
+    fn build_body_preserves_messages_and_max_tokens() {
+        use crate::client::{ApiContentBlock, ApiMessage};
+
+        let provider = BedrockProvider::new("AKIATEST", "secret", None, "us-east-1");
+        let request = CreateMessageRequest {
+            model: "eu.anthropic.claude-sonnet-4-6".to_string(),
+            max_tokens: 2048,
+            messages: vec![ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::Text {
+                    text: "Hello".to_string(),
+                    cache_control: None,
+                }],
+            }],
+            system: None,
+            tools: None,
+            stream: true, // should be stripped
+            metadata: None,
+            thinking: None,
+        };
+
+        let body = provider.build_body(&request).unwrap();
+        let obj = body.as_object().unwrap();
+
+        assert_eq!(obj["max_tokens"], 2048);
+        assert_eq!(obj["anthropic_version"], BEDROCK_API_VERSION);
+        assert!(!obj.contains_key("model"));
+        assert!(!obj.contains_key("stream"));
+
+        let messages = obj["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+    }
+
+    #[test]
+    fn build_body_strips_tool_result_names() {
+        use crate::client::{ApiContentBlock, ApiMessage};
+
+        let provider = BedrockProvider::new("AKIATEST", "secret", None, "us-east-1");
+        let request = CreateMessageRequest {
+            model: "eu.anthropic.claude-sonnet-4-6".to_string(),
+            max_tokens: 1024,
+            messages: vec![ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::ToolResult {
+                    tool_use_id: "id_123".to_string(),
+                    content: serde_json::json!(""),
+                    is_error: Some(false),
+                    cache_control: None,
+                    name: Some("my_tool".to_string()),
+                }],
+            }],
+            system: None,
+            tools: None,
+            stream: false,
+            metadata: None,
+            thinking: None,
+        };
+
+        let body = provider.build_body(&request).unwrap();
+        let messages = body["messages"].as_array().unwrap();
+        let content = messages[0]["content"].as_array().unwrap();
+        // name should be stripped (null) — Anthropic/Bedrock doesn't accept it
+        assert!(content[0].get("name").map_or(true, |v| v.is_null()));
+    }
+
+    #[test]
+    fn invoke_url_with_cross_region_prefix() {
+        let provider = BedrockProvider::new("AKIATEST", "secret", None, "eu-west-1");
+        assert_eq!(
+            provider.invoke_url("eu.anthropic.claude-sonnet-4-6"),
+            "https://bedrock-runtime.eu-west-1.amazonaws.com/model/eu.anthropic.claude-sonnet-4-6/invoke"
+        );
+    }
+
+    #[test]
+    fn invoke_url_different_regions() {
+        for (region, prefix) in [("us-east-1", "us"), ("eu-west-1", "eu"), ("ap-northeast-1", "apac")] {
+            let provider = BedrockProvider::new("AKIATEST", "secret", None, region);
+            let url = provider.invoke_url(&format!("{prefix}.anthropic.claude-sonnet-4-6"));
+            assert!(url.contains(&format!("bedrock-runtime.{region}.amazonaws.com")));
+        }
+    }
+
+    #[test]
+    fn cost_rates_opus_fallback() {
+        let provider = BedrockProvider::new("AKIATEST", "secret", None, "us-east-1");
+        let rates = provider.cost_rates("eu.anthropic.claude-opus-4-6-v1");
+        assert!((rates.input_per_million - 5.0).abs() < 1e-9);
+        assert!((rates.output_per_million - 25.0).abs() < 1e-9);
+        assert_eq!(rates.cache_read_multiplier, Some(0.1));
+        assert_eq!(rates.cache_creation_multiplier, Some(1.25));
+    }
+
+    #[test]
+    fn cost_rates_unknown_model_defaults_to_sonnet() {
+        let provider = BedrockProvider::new("AKIATEST", "secret", None, "us-east-1");
+        let rates = provider.cost_rates("some-unknown-model");
+        assert!((rates.input_per_million - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn session_token_accepted() {
+        let provider = BedrockProvider::new(
+            "AKIATEST",
+            "secret",
+            Some("session-token-value".to_string()),
+            "us-east-1",
+        );
+        // Provider should be constructable with a session token
+        assert_eq!(provider.name(), "bedrock");
+    }
+
+    // ── AWS Event Stream decoder tests ─────────────────────────────────
+
+    #[test]
+    fn parse_event_stream_headers_extracts_event_type() {
+        // Build a header: name = ":event-type", type = 7 (string), value = "chunk"
+        let mut data = Vec::new();
+        let name = b":event-type";
+        data.push(name.len() as u8);
+        data.extend_from_slice(name);
+        data.push(7); // string type
+        let value = b"chunk";
+        data.extend_from_slice(&(value.len() as u16).to_be_bytes());
+        data.extend_from_slice(value);
+
+        let mut event_type = String::new();
+        parse_event_stream_headers(&data, &mut event_type);
+        assert_eq!(event_type, "chunk");
+    }
+
+    #[test]
+    fn parse_event_stream_headers_empty() {
+        let mut event_type = String::new();
+        parse_event_stream_headers(&[], &mut event_type);
+        assert_eq!(event_type, "");
+    }
+
+    #[test]
+    fn parse_event_stream_headers_non_event_type() {
+        // Build a header with a different name
+        let mut data = Vec::new();
+        let name = b":content-type";
+        data.push(name.len() as u8);
+        data.extend_from_slice(name);
+        data.push(7); // string type
+        let value = b"application/json";
+        data.extend_from_slice(&(value.len() as u16).to_be_bytes());
+        data.extend_from_slice(value);
+
+        let mut event_type = String::new();
+        parse_event_stream_headers(&data, &mut event_type);
+        assert_eq!(event_type, ""); // not :event-type, so stays empty
+    }
+
+    #[test]
+    fn parse_bedrock_event_message_start() {
+        let json = r#"{"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"model":"claude-sonnet-4-6","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}"#;
+        let event = parse_bedrock_event("message_start", json).unwrap();
+        match event {
+            StreamEvent::MessageStart { message } => {
+                assert_eq!(message.id, "msg_1");
+                assert_eq!(message.model, "claude-sonnet-4-6");
+                assert_eq!(message.usage.input_tokens, 10);
+            }
+            _ => panic!("expected MessageStart"),
+        }
+    }
+
+    #[test]
+    fn parse_bedrock_event_content_block_delta() {
+        let json = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#;
+        let event = parse_bedrock_event("content_block_delta", json).unwrap();
+        match event {
+            StreamEvent::ContentBlockDelta { index, delta } => {
+                assert_eq!(index, 0);
+                match delta {
+                    crate::client::ContentDelta::TextDelta { text } => assert_eq!(text, "Hello"),
+                    _ => panic!("expected TextDelta"),
+                }
+            }
+            _ => panic!("expected ContentBlockDelta"),
+        }
+    }
+
+    #[test]
+    fn parse_bedrock_event_message_stop() {
+        let event = parse_bedrock_event("message_stop", r#"{"type":"message_stop"}"#).unwrap();
+        assert!(matches!(event, StreamEvent::MessageStop));
+    }
+
+    #[test]
+    fn parse_bedrock_event_ping() {
+        let event = parse_bedrock_event("ping", r#"{"type":"ping"}"#).unwrap();
+        assert!(matches!(event, StreamEvent::Ping));
+    }
+
+    #[test]
+    fn parse_bedrock_event_unknown_type_returns_ping() {
+        let event = parse_bedrock_event("some_future_event", r#"{"type":"some_future_event"}"#).unwrap();
+        assert!(matches!(event, StreamEvent::Ping));
+    }
+
+    #[test]
+    fn parse_bedrock_event_message_delta() {
+        let json = r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":42}}"#;
+        let event = parse_bedrock_event("message_delta", json).unwrap();
+        match event {
+            StreamEvent::MessageDelta { usage, .. } => {
+                assert_eq!(usage.output_tokens, 42);
+            }
+            _ => panic!("expected MessageDelta"),
+        }
+    }
+
+    /// Build a synthetic AWS Event Stream frame for testing.
+    ///
+    /// Frame format:
+    ///   [4: total_len] [4: headers_len] [4: prelude_crc]
+    ///   [headers...] [payload...] [4: message_crc]
+    fn build_event_frame(event_type: &str, payload: &[u8]) -> Vec<u8> {
+        // Build headers: ":event-type" = event_type (string, type 7)
+        let mut headers = Vec::new();
+        let name = b":event-type";
+        headers.push(name.len() as u8);
+        headers.extend_from_slice(name);
+        headers.push(7); // string type
+        headers.extend_from_slice(&(event_type.len() as u16).to_be_bytes());
+        headers.extend_from_slice(event_type.as_bytes());
+
+        let headers_len = headers.len();
+        let total_len = 12 + headers_len + payload.len() + 4; // prelude + headers + payload + msg_crc
+
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&(total_len as u32).to_be_bytes());
+        frame.extend_from_slice(&(headers_len as u32).to_be_bytes());
+        frame.extend_from_slice(&[0u8; 4]); // prelude CRC (skipped in parser)
+        frame.extend_from_slice(&headers);
+        frame.extend_from_slice(payload);
+        frame.extend_from_slice(&[0u8; 4]); // message CRC (skipped in parser)
+        frame
+    }
+
+    #[tokio::test]
+    async fn aws_event_stream_decodes_single_frame() {
+        use base64::Engine;
+        use tokio_stream::StreamExt;
+
+        // Build a content_block_delta event
+        let inner_json = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}"#;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(inner_json);
+        let payload = serde_json::to_vec(&serde_json::json!({"bytes": b64})).unwrap();
+        let frame = build_event_frame("chunk", &payload);
+
+        let byte_stream = tokio_stream::once(Ok::<_, reqwest::Error>(bytes::Bytes::from(frame)));
+        let mut events: Vec<_> = aws_event_stream(byte_stream)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(events.len(), 1);
+        let event = events.remove(0).unwrap();
+        match event {
+            StreamEvent::ContentBlockDelta { index, delta } => {
+                assert_eq!(index, 0);
+                match delta {
+                    crate::client::ContentDelta::TextDelta { text } => assert_eq!(text, "Hi"),
+                    _ => panic!("expected TextDelta"),
+                }
+            }
+            _ => panic!("expected ContentBlockDelta, got {:?}", event),
+        }
+    }
+
+    #[tokio::test]
+    async fn aws_event_stream_decodes_multiple_frames() {
+        use base64::Engine;
+        use tokio_stream::StreamExt;
+
+        let events_data = vec![
+            r#"{"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"model":"claude-sonnet-4-6","stop_reason":null,"usage":{"input_tokens":5,"output_tokens":0}}}"#,
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"OK"}}"#,
+            r#"{"type":"message_stop"}"#,
+        ];
+
+        let mut all_frames = Vec::new();
+        for json in &events_data {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(json);
+            let payload = serde_json::to_vec(&serde_json::json!({"bytes": b64})).unwrap();
+            all_frames.extend_from_slice(&build_event_frame("chunk", &payload));
+        }
+
+        let byte_stream = tokio_stream::once(Ok::<_, reqwest::Error>(bytes::Bytes::from(all_frames)));
+        let events: Vec<_> = aws_event_stream(byte_stream)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(events.len(), 3);
+        assert!(matches!(events[0].as_ref().unwrap(), StreamEvent::MessageStart { .. }));
+        assert!(matches!(events[1].as_ref().unwrap(), StreamEvent::ContentBlockDelta { .. }));
+        assert!(matches!(events[2].as_ref().unwrap(), StreamEvent::MessageStop));
+    }
+
+    #[tokio::test]
+    async fn aws_event_stream_handles_chunked_delivery() {
+        use base64::Engine;
+        use tokio_stream::StreamExt;
+
+        // Build a frame, then split it across two chunks to simulate network fragmentation
+        let inner_json = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"split"}}"#;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(inner_json);
+        let payload = serde_json::to_vec(&serde_json::json!({"bytes": b64})).unwrap();
+        let frame = build_event_frame("chunk", &payload);
+
+        let mid = frame.len() / 2;
+        let chunk1 = bytes::Bytes::from(frame[..mid].to_vec());
+        let chunk2 = bytes::Bytes::from(frame[mid..].to_vec());
+
+        let byte_stream = tokio_stream::iter(vec![
+            Ok::<_, reqwest::Error>(chunk1),
+            Ok(chunk2),
+        ]);
+
+        let events: Vec<_> = aws_event_stream(byte_stream)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(events.len(), 1);
+        match events[0].as_ref().unwrap() {
+            StreamEvent::ContentBlockDelta { delta, .. } => match delta {
+                crate::client::ContentDelta::TextDelta { text } => assert_eq!(text, "split"),
+                _ => panic!("expected TextDelta"),
+            },
+            _ => panic!("expected ContentBlockDelta"),
+        }
+    }
+
+    #[tokio::test]
+    async fn aws_event_stream_empty_stream() {
+        use tokio_stream::StreamExt;
+
+        let byte_stream = tokio_stream::empty::<std::result::Result<bytes::Bytes, reqwest::Error>>();
+        let events: Vec<_> = aws_event_stream(byte_stream)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert!(events.is_empty());
+    }
 }
