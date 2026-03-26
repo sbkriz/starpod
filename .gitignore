@@ -9,3 +9,4 @@ crates/starpod-gateway/static/dist/
 workspace/.fastembed_cache/
 .fastembed_cache
 .DS_Store
+.env
