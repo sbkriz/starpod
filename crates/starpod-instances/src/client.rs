@@ -385,6 +385,8 @@ mod tests {
             error_message: None,
             email_address: None,
             starpod_api_key: None,
+            web_url: None,
+            direct_url: None,
             secret_overrides: None,
             created_at: "2025-03-10T00:00:00Z".to_string(),
         }
