@@ -1,6 +1,7 @@
 pub mod flush;
 pub mod tools;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -57,6 +58,17 @@ pub struct StarpodAgent {
     config: RwLock<StarpodConfig>,
     /// Cached model registry (populated lazily with Ollama discovery).
     model_registry: tokio::sync::RwLock<Option<Arc<ModelRegistry>>>,
+    /// Per-session bootstrap snapshot cache.
+    ///
+    /// The bootstrap context (SOUL.md, USER.md, MEMORY.md, daily logs) is
+    /// frozen at session start and reused for every subsequent turn in that
+    /// session. This avoids re-reading files from disk on every turn and —
+    /// crucially — keeps the system-prompt prefix byte-identical across
+    /// turns, which lets the LLM provider's prompt cache stay warm.
+    ///
+    /// Mid-session `MemoryWrite` calls still update files on disk, but the
+    /// snapshot is only refreshed when a new session begins.
+    bootstrap_cache: tokio::sync::RwLock<HashMap<String, String>>,
 }
 
 impl StarpodAgent {
@@ -171,6 +183,7 @@ impl StarpodAgent {
             paths,
             config: RwLock::new(config),
             model_registry: tokio::sync::RwLock::new(None),
+            bootstrap_cache: tokio::sync::RwLock::new(HashMap::new()),
         })
     }
 
@@ -334,14 +347,33 @@ impl StarpodAgent {
     }
 
     /// Build the system prompt from bootstrap context + skill catalog.
+    ///
+    /// The bootstrap context (SOUL.md, USER.md, MEMORY.md, daily logs) is
+    /// frozen per session — computed once on the first turn and reused for
+    /// all subsequent turns. This keeps the prompt prefix stable for the
+    /// LLM provider's prompt cache and avoids redundant disk I/O.
     async fn build_system_prompt(&self, session_id: &str, config: &StarpodConfig, user_id: Option<&str>, activated_skill: Option<&str>) -> Result<String> {
         let agent_name = &config.agent_name;
-        let bootstrap = if let Some(uid) = user_id {
-            let user_dir = self.paths.users_dir.join(uid);
-            let uv = UserMemoryView::new(Arc::clone(&self.memory), user_dir).await?;
-            uv.bootstrap_context(config.memory.bootstrap_file_cap)?
-        } else {
-            self.memory.bootstrap_context()?
+
+        // Check the per-session bootstrap cache first.
+        let bootstrap = {
+            let cache = self.bootstrap_cache.read().await;
+            cache.get(session_id).cloned()
+        };
+        let bootstrap = match bootstrap {
+            Some(cached) => cached,
+            None => {
+                let fresh = if let Some(uid) = user_id {
+                    let user_dir = self.paths.users_dir.join(uid);
+                    let uv = UserMemoryView::new(Arc::clone(&self.memory), user_dir).await?;
+                    uv.bootstrap_context(config.memory.bootstrap_file_cap)?
+                } else {
+                    self.memory.bootstrap_context()?
+                };
+                let mut cache = self.bootstrap_cache.write().await;
+                cache.insert(session_id.to_string(), fresh.clone());
+                fresh
+            }
         };
         let skill_catalog = self.skills.skill_catalog_excluding(activated_skill)?;
         let date_str = Local::now().format("%A, %B %d, %Y at %H:%M").to_string();
@@ -1288,6 +1320,10 @@ impl StarpodAgent {
     /// Formats all messages as markdown and writes to the memory store so they
     /// become searchable. Runs in the background to avoid blocking the chat flow.
     async fn export_session_to_memory(&self, session_id: &str) {
+        // Always evict the frozen bootstrap snapshot when a session closes,
+        // regardless of whether the transcript export is enabled.
+        self.bootstrap_cache.write().await.remove(session_id);
+
         let config = self.snapshot_config();
         if !config.memory.export_sessions {
             return;
@@ -2383,5 +2419,54 @@ mod tests {
         let mut prompt = "Base prompt.".to_string();
         append_execution_context(&mut prompt, None, None);
         assert_eq!(prompt, "Base prompt.");
+    }
+
+    #[tokio::test]
+    async fn test_bootstrap_cache_frozen_per_session() {
+        let tmp = TempDir::new().unwrap();
+        let agent = StarpodAgent::new(test_config(&tmp)).await.unwrap();
+        let config = agent.snapshot_config();
+        let session_id = "test-session-1";
+
+        // First call computes and caches bootstrap
+        let prompt1 = agent.build_system_prompt(session_id, &config, None, None).await.unwrap();
+        assert!(prompt1.contains("SOUL.md"));
+
+        // Mutate the SOUL.md on disk
+        let soul_path = agent.paths.config_dir.join("SOUL.md");
+        std::fs::write(&soul_path, "# Soul\nModified content").unwrap();
+
+        // Second call for the SAME session returns the frozen snapshot
+        let prompt2 = agent.build_system_prompt(session_id, &config, None, None).await.unwrap();
+
+        // The bootstrap portion should be identical (frozen)
+        assert!(!prompt2.contains("Modified content"));
+
+        // A DIFFERENT session gets the fresh (modified) content
+        let prompt3 = agent.build_system_prompt("test-session-2", &config, None, None).await.unwrap();
+        assert!(prompt3.contains("Modified content"));
+    }
+
+    #[tokio::test]
+    async fn test_bootstrap_cache_evicted_on_session_export() {
+        let tmp = TempDir::new().unwrap();
+        let mut cfg = test_config(&tmp);
+        cfg.memory.export_sessions = true;
+        let agent = StarpodAgent::new(cfg).await.unwrap();
+        let config = agent.snapshot_config();
+
+        // Populate the cache for a session
+        let session_id = "evict-test-session";
+        let _ = agent.build_system_prompt(session_id, &config, None, None).await.unwrap();
+
+        // Verify cache is populated
+        assert!(agent.bootstrap_cache.read().await.contains_key(session_id));
+
+        // Export triggers eviction (will fail to find session in DB, but
+        // the cache eviction still runs)
+        agent.export_session_to_memory(session_id).await;
+
+        // Cache entry should be gone
+        assert!(!agent.bootstrap_cache.read().await.contains_key(session_id));
     }
 }
