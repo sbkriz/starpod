@@ -244,7 +244,7 @@ pub fn derive_master_key(db_dir: &Path) -> Result<[u8; 32]> {
             .map_err(|e| StarpodError::Vault(format!("Failed to create db dir: {}", e)))?;
         let mut key = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut key);
-        std::fs::write(&key_path, &key)
+        std::fs::write(&key_path, key)
             .map_err(|e| StarpodError::Vault(format!("Failed to write vault key: {}", e)))?;
         // Best-effort: restrict permissions on Unix
         #[cfg(unix)]
@@ -398,7 +398,7 @@ mod tests {
         let db_dir = tmp.path().join("db");
         std::fs::create_dir_all(&db_dir).unwrap();
         // Write a key with wrong length
-        std::fs::write(db_dir.join(".vault_key"), &[0u8; 16]).unwrap();
+        std::fs::write(db_dir.join(".vault_key"), [0u8; 16]).unwrap();
 
         let result = derive_master_key(&db_dir);
         assert!(result.is_err());

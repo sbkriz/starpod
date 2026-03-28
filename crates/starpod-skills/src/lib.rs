@@ -448,7 +448,7 @@ impl SkillStore {
         let skills = self.list()?;
         let filtered: Vec<_> = skills
             .iter()
-            .filter(|s| exclude.map_or(true, |ex| !s.name.eq_ignore_ascii_case(ex)))
+            .filter(|s| exclude.is_none_or(|ex| !s.name.eq_ignore_ascii_case(ex)))
             .collect();
         if filtered.is_empty() {
             return Ok(String::new());

@@ -91,7 +91,7 @@ impl AppState {
             .channels
             .telegram
             .as_ref()
-            .map_or(false, |t| t.enabled);
+            .is_some_and(|t| t.enabled);
         let token = config.resolved_telegram_token();
 
         match (enabled, token) {
@@ -210,10 +210,10 @@ async fn docs_handler(uri: Uri) -> Response {
     if let Some(file) = DOCS_DIR.get_file(file_path) {
         let mime = mime_from_path(file_path);
         ([(header::CONTENT_TYPE, mime)], file.contents()).into_response()
-    } else if let Some(file) = DOCS_DIR.get_file(&format!("{}.html", file_path)) {
+    } else if let Some(file) = DOCS_DIR.get_file(format!("{}.html", file_path)) {
         let mime = mime_from_path(&format!("{}.html", file_path));
         ([(header::CONTENT_TYPE, mime)], file.contents()).into_response()
-    } else if let Some(file) = DOCS_DIR.get_file(&format!("{}/index.html", file_path)) {
+    } else if let Some(file) = DOCS_DIR.get_file(format!("{}/index.html", file_path)) {
         (
             [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
             file.contents(),
@@ -253,6 +253,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 /// The `paths` parameter determines which config files are watched for hot reload:
 /// - **Workspace**: watches both `starpod.toml` and `agents/<name>/agent.toml`
 /// - **SingleAgent**: watches `.starpod/agent.toml`
+///
 /// Create and bootstrap an `AuthStore` for the given paths.
 ///
 /// This is the canonical way to create an auth store. Both the gateway and the
@@ -437,6 +438,7 @@ fn start_config_watcher(
     paths: &ResolvedPaths,
 ) -> Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>> {
     let paths_clone = paths.clone();
+    #[allow(clippy::type_complexity)]
     let (watch_dir, watch_files, reload_fn): (
         PathBuf,
         Vec<PathBuf>,
@@ -602,9 +604,10 @@ mod tests {
     use super::*;
 
     fn test_starpod_config() -> starpod_core::StarpodConfig {
-        let mut cfg = starpod_core::StarpodConfig::default();
-        cfg.models = vec!["anthropic/claude-sonnet-4-6".into()];
-        cfg
+        starpod_core::StarpodConfig {
+            models: vec!["anthropic/claude-sonnet-4-6".into()],
+            ..starpod_core::StarpodConfig::default()
+        }
     }
 
     #[test]

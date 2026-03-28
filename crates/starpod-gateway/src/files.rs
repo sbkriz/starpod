@@ -208,7 +208,7 @@ async fn list_handler(
         ));
     }
 
-    let entries = std::fs::read_dir(&resolved).map_err(|e| internal(e))?;
+    let entries = std::fs::read_dir(&resolved).map_err(internal)?;
     let mut items: Vec<FileEntry> = Vec::new();
 
     for entry in entries.flatten() {
@@ -296,10 +296,10 @@ async fn write_handler(
         validate_sandbox_path(&req.path, home).map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
 
     if let Some(parent) = resolved.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| internal(e))?;
+        std::fs::create_dir_all(parent).map_err(internal)?;
     }
 
-    std::fs::write(&resolved, &req.content).map_err(|e| internal(e))?;
+    std::fs::write(&resolved, &req.content).map_err(internal)?;
 
     Ok(Json(serde_json::json!({"status": "ok"})))
 }
@@ -328,9 +328,9 @@ async fn delete_handler(
     }
 
     if resolved.is_dir() {
-        std::fs::remove_dir_all(&resolved).map_err(|e| internal(e))?;
+        std::fs::remove_dir_all(&resolved).map_err(internal)?;
     } else {
-        std::fs::remove_file(&resolved).map_err(|e| internal(e))?;
+        std::fs::remove_file(&resolved).map_err(internal)?;
     }
 
     Ok(Json(serde_json::json!({"status": "ok"})))
@@ -352,7 +352,7 @@ async fn mkdir_handler(
     let resolved =
         validate_sandbox_path(&req.path, home).map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
 
-    std::fs::create_dir_all(&resolved).map_err(|e| internal(e))?;
+    std::fs::create_dir_all(&resolved).map_err(internal)?;
 
     Ok(Json(serde_json::json!({"status": "ok"})))
 }
@@ -387,7 +387,7 @@ async fn raw_handler(
         ));
     }
 
-    let meta = resolved.metadata().map_err(|e| internal(e))?;
+    let meta = resolved.metadata().map_err(internal)?;
     const MAX_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
     if meta.len() > MAX_SIZE {
         return Err(err(
@@ -396,7 +396,7 @@ async fn raw_handler(
         ));
     }
 
-    let bytes = std::fs::read(&resolved).map_err(|e| internal(e))?;
+    let bytes = std::fs::read(&resolved).map_err(internal)?;
     let mime = mime_guess::from_path(&resolved)
         .first_or_octet_stream()
         .to_string();

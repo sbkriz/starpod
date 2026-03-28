@@ -47,12 +47,13 @@ pub enum HookError {
 pub type Result<T> = std::result::Result<T, HookError>;
 
 #[cfg(test)]
+#[allow(clippy::invalid_regex)]
 mod tests {
     use super::*;
 
     #[test]
     fn display_invalid_regex() {
-        let err = HookError::InvalidRegex(regex::Regex::new("[invalid").unwrap_err());
+        let err = HookError::InvalidRegex(regex::Regex::new(r"[invalid").unwrap_err());
         let msg = err.to_string();
         assert!(msg.contains("Invalid hook matcher regex"), "got: {}", msg);
     }
@@ -71,7 +72,7 @@ mod tests {
 
     #[test]
     fn from_regex_error() {
-        let regex_err = regex::Regex::new("[bad").unwrap_err();
+        let regex_err = regex::Regex::new(r"[bad").unwrap_err();
         let hook_err: HookError = regex_err.into();
         assert!(matches!(hook_err, HookError::InvalidRegex(_)));
     }

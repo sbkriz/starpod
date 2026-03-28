@@ -198,6 +198,7 @@ pub struct DeployOpts<'a> {
     pub zone: Option<&'a str>,
     pub machine_type: Option<&'a str>,
     /// Callback invoked during instance provisioning polling (status updates).
+    #[allow(clippy::type_complexity)]
     pub on_instance_poll: Option<Box<dyn FnMut(&InstanceResponse) + Send>>,
 }
 

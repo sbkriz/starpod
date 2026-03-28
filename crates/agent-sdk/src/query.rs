@@ -628,7 +628,7 @@ async fn run_agent_loop(
         // Update model usage
         let model_entry = model_usage
             .entry(model.clone())
-            .or_insert_with(ModelUsage::default);
+            .or_default();
         model_entry.input_tokens += response.usage.input_tokens;
         model_entry.output_tokens += response.usage.output_tokens;
         model_entry.cost_usd += turn_cost;
@@ -1336,6 +1336,7 @@ fn parse_content_blocks(content: &serde_json::Value) -> Option<Vec<ApiContentBlo
 }
 
 /// Build a ResultMessage.
+#[allow(clippy::too_many_arguments)]
 fn build_result_message(
     subtype: ResultSubtype,
     session_id: &str,
@@ -1368,6 +1369,7 @@ fn build_result_message(
 }
 
 /// Build an error ResultMessage.
+#[allow(clippy::too_many_arguments)]
 fn build_error_result_message(
     session_id: &str,
     error_msg: &str,

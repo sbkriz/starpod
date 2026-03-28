@@ -349,7 +349,7 @@ mod tests {
         let results = view.search("assistant", 10).await.unwrap();
         let sources: Vec<&str> = results.iter().map(|r| r.source.as_str()).collect();
         assert!(
-            sources.iter().any(|s| *s == "SOUL.md") || sources.iter().any(|s| *s == "MEMORY.md"),
+            sources.contains(&"SOUL.md") || sources.contains(&"MEMORY.md"),
             "Should find results from both agent and user stores"
         );
     }

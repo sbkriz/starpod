@@ -160,7 +160,7 @@ pub async fn populate_vault(
             all_secrets.push((key.as_str(), entry));
         }
     }
-    for (_skill_name, section) in &manifest.skills {
+    for section in manifest.skills.values() {
         for (key, entry) in &section.secrets {
             if seen_secrets.insert(key.as_str()) {
                 all_secrets.push((key.as_str(), entry));
@@ -209,7 +209,7 @@ pub async fn populate_vault(
             all_variables.push((key.as_str(), entry));
         }
     }
-    for (_skill_name, section) in &manifest.skills {
+    for section in manifest.skills.values() {
         for (key, entry) in &section.variables {
             if seen_variables.insert(key.as_str()) {
                 all_variables.push((key.as_str(), entry));

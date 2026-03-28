@@ -28,6 +28,7 @@ impl Role {
 
     /// Parse from a lowercase string (as stored in the database).
     /// Returns `None` for unrecognized values.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "admin" => Some(Role::Admin),

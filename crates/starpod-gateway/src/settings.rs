@@ -437,7 +437,7 @@ async fn put_general(
     }
     for spec in &settings.models {
         if starpod_core::parse_model_spec(spec).is_none() {
-            return Err(bad_request(&format!(
+            return Err(bad_request(format!(
                 "invalid model spec: '{}' — expected 'provider/model'",
                 spec
             )));
@@ -696,9 +696,9 @@ async fn put_frontend(
         greeting: settings.greeting,
         prompts: settings.prompts,
     };
-    let toml_str = toml::to_string_pretty(&cfg).map_err(|e| internal(e))?;
+    let toml_str = toml::to_string_pretty(&cfg).map_err(internal)?;
     let path = state.paths.config_dir.join("frontend.toml");
-    std::fs::write(&path, toml_str).map_err(|e| internal(e))?;
+    std::fs::write(&path, toml_str).map_err(internal)?;
 
     Ok(ok_json())
 }
@@ -761,14 +761,14 @@ async fn put_heartbeat(
             .memory()
             .write_file("HEARTBEAT.md", &content)
             .await
-            .map_err(|e| internal(e))?;
+            .map_err(internal)?;
 
         // Create the cron job if it doesn't exist
         let cron_store = state.agent.cron();
         if cron_store
             .get_job_by_name("__heartbeat__")
             .await
-            .map_err(|e| internal(e))?
+            .map_err(internal)?
             .is_none()
         {
             let resolved_tz = state.config.read().unwrap().resolved_timezone();
@@ -788,13 +788,13 @@ async fn put_heartbeat(
                     None,
                 )
                 .await
-                .map_err(|e| internal(e))?;
+                .map_err(internal)?;
         } else {
             // Update the schedule if the interval changed
             let job = cron_store
                 .get_job_by_name("__heartbeat__")
                 .await
-                .map_err(|e| internal(e))?
+                .map_err(internal)?
                 .unwrap();
             let new_schedule = starpod_cron::Schedule::Cron {
                 expr: format!("0 */{interval} * * * *"),
@@ -806,7 +806,7 @@ async fn put_heartbeat(
             cron_store
                 .update_job(&job.id, &update)
                 .await
-                .map_err(|e| internal(e))?;
+                .map_err(internal)?;
         }
     } else {
         // Disabled: clear the file and remove the cron job
@@ -815,7 +815,7 @@ async fn put_heartbeat(
             .memory()
             .write_file("HEARTBEAT.md", "")
             .await
-            .map_err(|e| internal(e))?;
+            .map_err(internal)?;
 
         let cron_store = state.agent.cron();
         // Remove the job if it exists (ignore errors — may not exist)
@@ -857,7 +857,7 @@ async fn put_file(
         .memory()
         .write_file(&name, &body.content)
         .await
-        .map_err(|e| internal(e))?;
+        .map_err(internal)?;
 
     Ok(ok_json())
 }
@@ -904,9 +904,9 @@ async fn list_users(State(state): State<Arc<AppState>>) -> ApiResult<Vec<UserInf
     let mut users = Vec::new();
 
     if users_dir.is_dir() {
-        let entries = std::fs::read_dir(users_dir).map_err(|e| internal(e))?;
+        let entries = std::fs::read_dir(users_dir).map_err(internal)?;
         for entry in entries.flatten() {
-            let ft = entry.file_type().map_err(|e| internal(e))?;
+            let ft = entry.file_type().map_err(internal)?;
             if !ft.is_dir() {
                 continue;
             }
@@ -937,16 +937,16 @@ async fn create_user(
     }
 
     // Create user directory + seed defaults
-    std::fs::create_dir_all(user_dir.join("memory")).map_err(|e| internal(e))?;
+    std::fs::create_dir_all(user_dir.join("memory")).map_err(internal)?;
 
     let default_user_md =
         "# User Profile\n\n## Name\n\n## Role\n\n## Expertise\n\n## Preferences\n\n## Context\n";
-    std::fs::write(user_dir.join("USER.md"), default_user_md).map_err(|e| internal(e))?;
+    std::fs::write(user_dir.join("USER.md"), default_user_md).map_err(internal)?;
     std::fs::write(
         user_dir.join("MEMORY.md"),
         "# Memory Index\n\nImportant facts and links to memory files.\n",
     )
-    .map_err(|e| internal(e))?;
+    .map_err(internal)?;
 
     Ok((
         StatusCode::CREATED,
@@ -999,7 +999,7 @@ async fn update_user(
         ));
     }
 
-    std::fs::write(user_dir.join("USER.md"), &body.content).map_err(|e| internal(e))?;
+    std::fs::write(user_dir.join("USER.md"), &body.content).map_err(internal)?;
 
     Ok(ok_json())
 }
@@ -1018,7 +1018,7 @@ async fn delete_user(
         ));
     }
 
-    std::fs::remove_dir_all(&user_dir).map_err(|e| internal(e))?;
+    std::fs::remove_dir_all(&user_dir).map_err(internal)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1028,12 +1028,12 @@ async fn delete_user(
 fn skill_store(
     state: &AppState,
 ) -> Result<starpod_skills::SkillStore, (StatusCode, Json<ErrorResponse>)> {
-    starpod_skills::SkillStore::new(&state.paths.skills_dir).map_err(|e| internal(e))
+    starpod_skills::SkillStore::new(&state.paths.skills_dir).map_err(internal)
 }
 
 async fn list_skills(State(state): State<Arc<AppState>>) -> ApiResult<Vec<SkillInfo>> {
     let store = skill_store(&state)?;
-    let skills = store.list().map_err(|e| internal(e))?;
+    let skills = store.list().map_err(internal)?;
     Ok(Json(
         skills
             .into_iter()
@@ -1057,7 +1057,7 @@ async fn create_skill(
         .map_err(|e| bad_request(e.to_string()))?;
     let skill = store
         .get(&req.name)
-        .map_err(|e| internal(e))?
+        .map_err(internal)?
         .ok_or_else(|| internal("Skill created but not found"))?;
     Ok((
         StatusCode::CREATED,
@@ -1079,7 +1079,7 @@ async fn get_skill(
     let store = skill_store(&state)?;
     let skill = store
         .get(&name)
-        .map_err(|e| internal(e))?
+        .map_err(internal)?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, format!("Skill '{}' not found", name)))?;
     Ok(Json(SkillDetail {
         name: skill.name,
@@ -1198,7 +1198,7 @@ async fn generate_skill(
     use futures::StreamExt;
     let mut result_msg = None;
     while let Some(msg_result) = stream.next().await {
-        let msg = msg_result.map_err(|e| internal(e))?;
+        let msg = msg_result.map_err(internal)?;
         if let agent_sdk::Message::Result(result) = msg {
             result_msg = Some(result);
         }
@@ -1238,7 +1238,7 @@ async fn list_auth_users(State(state): State<Arc<AppState>>) -> ApiResult<Vec<st
         .list_users()
         .await
         .map(Json)
-        .map_err(|e| internal(e))
+        .map_err(internal)
 }
 
 async fn get_auth_user(
@@ -1249,7 +1249,7 @@ async fn get_auth_user(
         .auth
         .get_user(&id)
         .await
-        .map_err(|e| internal(e))?
+        .map_err(internal)?
         .map(Json)
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))
 }
@@ -1262,7 +1262,7 @@ async fn create_auth_user(
         .auth
         .create_user(req.email.as_deref(), req.display_name.as_deref(), req.role)
         .await
-        .map_err(|e| internal(e))?;
+        .map_err(internal)?;
 
     Ok((StatusCode::CREATED, Json(user)))
 }
@@ -1277,7 +1277,7 @@ async fn update_auth_user(
         .auth
         .get_user(&id)
         .await
-        .map_err(|e| internal(e))?
+        .map_err(internal)?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
 
     state
@@ -1290,14 +1290,14 @@ async fn update_auth_user(
             req.filesystem_enabled,
         )
         .await
-        .map_err(|e| internal(e))?;
+        .map_err(internal)?;
 
     // Return updated user
     state
         .auth
         .get_user(&id)
         .await
-        .map_err(|e| internal(e))?
+        .map_err(internal)?
         .map(Json)
         .ok_or_else(|| internal("User disappeared after update"))
 }
@@ -1318,7 +1318,7 @@ async fn deactivate_auth_user(
         .auth
         .deactivate_user(&id)
         .await
-        .map_err(|e| internal(e))?;
+        .map_err(internal)?;
 
     Ok(ok_json())
 }
@@ -1331,7 +1331,7 @@ async fn activate_auth_user(
         .auth
         .activate_user(&id)
         .await
-        .map_err(|e| internal(e))?;
+        .map_err(internal)?;
 
     Ok(ok_json())
 }
@@ -1345,7 +1345,7 @@ async fn list_auth_api_keys(
         .list_api_keys(&user_id)
         .await
         .map(Json)
-        .map_err(|e| internal(e))
+        .map_err(internal)
 }
 
 async fn create_auth_api_key(
@@ -1358,14 +1358,14 @@ async fn create_auth_api_key(
         .auth
         .get_user(&user_id)
         .await
-        .map_err(|e| internal(e))?
+        .map_err(internal)?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
 
     let created = state
         .auth
         .create_api_key(&user_id, req.label.as_deref())
         .await
-        .map_err(|e| internal(e))?;
+        .map_err(internal)?;
 
     Ok((StatusCode::CREATED, Json(created)))
 }
@@ -1378,7 +1378,7 @@ async fn revoke_auth_api_key(
         .auth
         .revoke_api_key(&key_id)
         .await
-        .map_err(|e| internal(e))?;
+        .map_err(internal)?;
 
     Ok(ok_json())
 }
@@ -1642,7 +1642,7 @@ async fn get_user_telegram(
         .auth
         .get_telegram_link_for_user(&user_id)
         .await
-        .map_err(|e| internal(e))?;
+        .map_err(internal)?;
 
     match link {
         Some(l) => Ok(Json(serde_json::json!({
@@ -1660,7 +1660,7 @@ async fn put_user_telegram(
     Json(req): Json<LinkTelegramRequest>,
 ) -> ApiResult<serde_json::Value> {
     // Require at least one identifier
-    if req.telegram_id.is_none() && req.username.as_ref().map_or(true, |u| u.trim().is_empty()) {
+    if req.telegram_id.is_none() && req.username.as_ref().is_none_or(|u| u.trim().is_empty()) {
         return Err(err(
             StatusCode::BAD_REQUEST,
             "Provide a Telegram ID or username",
@@ -1672,14 +1672,14 @@ async fn put_user_telegram(
         .auth
         .get_user(&user_id)
         .await
-        .map_err(|e| internal(e))?
+        .map_err(internal)?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
 
     let link = state
         .auth
         .link_telegram(&user_id, req.telegram_id, req.username.as_deref())
         .await
-        .map_err(|e| internal(e))?;
+        .map_err(internal)?;
 
     Ok(Json(serde_json::json!({
         "telegram_id": link.telegram_id,
@@ -1696,7 +1696,7 @@ async fn delete_user_telegram(
         .auth
         .unlink_telegram_by_user(&user_id)
         .await
-        .map_err(|e| internal(e))?;
+        .map_err(internal)?;
 
     Ok(ok_json())
 }

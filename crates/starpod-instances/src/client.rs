@@ -574,7 +574,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api/v1/instances"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(&Vec::<Instance>::new()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(Vec::<Instance>::new()))
             .mount(&server)
             .await;
 
@@ -632,7 +632,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/api/v1/instances"))
             .and(header("Authorization", "Bearer test-key"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(&Vec::<Instance>::new()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(Vec::<Instance>::new()))
             .mount(&server)
             .await;
 
@@ -647,7 +647,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api/v1/instances"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(&Vec::<Instance>::new()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(Vec::<Instance>::new()))
             .mount(&server)
             .await;
 
@@ -716,7 +716,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_id_full_uuid() {
-        let (server, client) = setup().await;
+        let (_server, client) = setup().await;
 
         // Full UUID should be returned as-is without any API calls
         let result = client
@@ -747,7 +747,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api/v1/instances"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(&Vec::<Instance>::new()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(Vec::<Instance>::new()))
             .mount(&server)
             .await;
 

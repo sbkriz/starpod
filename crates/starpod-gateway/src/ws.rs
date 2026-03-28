@@ -495,6 +495,7 @@ async fn handle_socket(
 
 /// Process a stream to completion, concurrently accepting new WS messages
 /// for followup injection or queuing.
+#[allow(clippy::too_many_arguments)]
 async fn process_stream_with_followups(
     stream: &mut agent_sdk::Query,
     sender: &mut futures::stream::SplitSink<WebSocket, WsMessage>,
@@ -634,6 +635,7 @@ enum StreamAction {
 /// `streamed_text` tracks whether text deltas have already been sent for this
 /// turn via `Message::StreamEvent`. When true, the `Message::Assistant` handler
 /// skips sending the text again (it was already streamed token-by-token).
+#[allow(clippy::too_many_arguments)]
 async fn handle_stream_message(
     msg: Message,
     sender: &mut futures::stream::SplitSink<WebSocket, WsMessage>,
@@ -697,10 +699,10 @@ async fn handle_stream_message(
                 result_text.push_str(&turn_text);
 
                 // Only send as TextDelta if text wasn't already streamed token-by-token
-                if !*streamed_text {
-                    if !send_msg(sender, &ServerMessage::TextDelta { text: turn_text }).await {
-                        return StreamAction::Disconnected;
-                    }
+                if !*streamed_text
+                    && !send_msg(sender, &ServerMessage::TextDelta { text: turn_text }).await
+                {
+                    return StreamAction::Disconnected;
                 }
             }
 

@@ -241,7 +241,7 @@ impl DeployManifest {
         if !path.exists() {
             return Ok(None);
         }
-        let content = std::fs::read_to_string(path).map_err(|e| StarpodError::Io(e))?;
+        let content = std::fs::read_to_string(path).map_err(StarpodError::Io)?;
         // Strip comment lines before parsing
         let body: String = content
             .lines()
@@ -350,7 +350,7 @@ impl DeployManifest {
     /// Write the manifest to a file.
     pub fn write_to(&self, path: &Path) -> Result<()> {
         let content = self.to_toml()?;
-        std::fs::write(path, content).map_err(|e| StarpodError::Io(e))?;
+        std::fs::write(path, content).map_err(StarpodError::Io)?;
         Ok(())
     }
 }

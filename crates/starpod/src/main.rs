@@ -1952,7 +1952,7 @@ async fn main() -> anyhow::Result<()> {
                 instance_dir.display().to_string().dimmed()
             );
             println!("  {} {}", "Server".dimmed(), addr.bright_green());
-            if let Some(ref key) = browser_token {
+            if let Some(key) = &browser_token {
                 println!("  {} {}", "API Key".dimmed(), key.bright_cyan());
             }
             print_separator();
@@ -2005,7 +2005,7 @@ async fn main() -> anyhow::Result<()> {
                 .channels
                 .telegram
                 .as_ref()
-                .map_or(false, |t| t.enabled);
+                .is_some_and(|t| t.enabled);
             let telegram_active = telegram_enabled && config.resolved_telegram_token().is_some();
             let agent = Arc::new(agent);
             let auth = starpod_gateway::create_auth_store(&paths)
@@ -2763,8 +2763,7 @@ async fn main() -> anyhow::Result<()> {
                             );
 
                             // Try to find them in local .env
-                            if local_env.is_some() && !yes {
-                                let local_env = local_env.as_ref().unwrap();
+                            if let (Some(local_env), false) = (&local_env, yes) {
                                 let pushable = config.missing_required_in_env(local_env);
 
                                 if !pushable.is_empty() {
@@ -3874,6 +3873,7 @@ async fn main() -> anyhow::Result<()> {
             let last_status = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
             let last_status_clone = last_status.clone();
 
+            #[allow(clippy::type_complexity)]
             let on_poll: Option<
                 Box<dyn FnMut(&starpod_instances::deploy::InstanceResponse) + Send>,
             > = if !no_instance {

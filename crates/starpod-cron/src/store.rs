@@ -63,6 +63,7 @@ impl CronStore {
     }
 
     /// Add a new cron job with full options. Returns the job ID.
+    #[allow(clippy::too_many_arguments)]
     pub async fn add_job_full(
         &self,
         name: &str,

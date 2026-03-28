@@ -708,6 +708,7 @@ pub fn custom_tool_definitions() -> Vec<CustomToolDefinition> {
 /// - Start with `.starpod` (defense-in-depth)
 /// - Contain `..` traversal
 /// - Are absolute paths
+///
 /// Parse an optional `env` JSON value from a tool input into a `SkillEnv`.
 fn parse_env_from_tool_input(value: Option<&serde_json::Value>) -> Option<SkillEnv> {
     value
@@ -1733,7 +1734,7 @@ pub async fn handle_custom_tool(
                 session_mode: input
                     .get("session_mode")
                     .and_then(|v| v.as_str())
-                    .map(|s| starpod_cron::SessionMode::from_str(s)),
+                    .map(starpod_cron::SessionMode::from_str),
             };
 
             if let Err(e) = ctx.cron.update_job(&job.id, &update).await {
@@ -2396,7 +2397,7 @@ fn strip_invisible_html(html: &str) -> String {
             element_content_handlers: vec![
                 // Remove entire elements for non-content tags.
                 element!(
-                    &REMOVE_TAGS.iter().copied().collect::<Vec<_>>().join(","),
+                    &REMOVE_TAGS.to_vec().join(","),
                     |el| {
                         el.remove();
                         Ok(())
@@ -2412,7 +2413,7 @@ fn strip_invisible_html(html: &str) -> String {
                     // aria-hidden="true"
                     if el
                         .get_attribute("aria-hidden")
-                        .map_or(false, |v| v.trim() == "true")
+                        .is_some_and(|v| v.trim() == "true")
                     {
                         el.remove();
                         return Ok(());

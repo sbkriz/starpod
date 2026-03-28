@@ -44,6 +44,7 @@ impl SessionMode {
     }
 
     /// Parse from a string, defaulting to `Isolated` for unknown values.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "main" => SessionMode::Main,
@@ -167,6 +168,7 @@ impl RunStatus {
     }
 
     /// Parse from a string, defaulting to `Pending` for unknown values.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "running" => RunStatus::Running,

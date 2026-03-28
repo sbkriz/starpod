@@ -211,7 +211,7 @@ impl CdpClient {
         self.writer
             .lock()
             .await
-            .send(WsMessage::Text(text.into()))
+            .send(WsMessage::Text(text))
             .await
             .map_err(|e| BrowserError::ConnectionFailed(e.to_string()))?;
 

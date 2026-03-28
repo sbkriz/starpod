@@ -674,13 +674,13 @@ fn markdown_to_telegram_html(input: &str) -> String {
         if let Some(bracket_end) = after_bracket.find(']') {
             let link_text = &after_bracket[..bracket_end];
             let after_close = &after_bracket[bracket_end + 1..];
-            if after_close.starts_with('(') {
-                if let Some(paren_end) = after_close[1..].find(')') {
-                    let url = &after_close[1..1 + paren_end];
+            if let Some(after_paren) = after_close.strip_prefix('(') {
+                if let Some(paren_end) = after_paren.find(')') {
+                    let url = &after_paren[..paren_end];
                     // Restore &amp; in URLs back to &
                     let url = url.replace("&amp;", "&");
                     buf.push_str(&format!("<a href=\"{}\">{}</a>", url, link_text));
-                    rest = &after_close[1 + paren_end + 1..];
+                    rest = &after_paren[paren_end + 1..];
                     continue;
                 }
             }

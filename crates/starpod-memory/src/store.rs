@@ -231,7 +231,7 @@ impl MemoryStore {
     /// Resolve a file path: config files go to config_dir, everything else to agent_home.
     fn resolve_path(&self, name: &str) -> PathBuf {
         // Check if this is a known config file (top-level only, not in subdirs)
-        if !name.contains('/') && Self::CONFIG_FILES.iter().any(|&f| f == name) {
+        if !name.contains('/') && Self::CONFIG_FILES.contains(&name) {
             self.config_dir.join(name)
         } else {
             self.agent_home.join(name)

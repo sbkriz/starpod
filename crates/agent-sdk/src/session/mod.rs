@@ -390,7 +390,7 @@ fn resolve_cwd(dir: Option<&str>) -> Result<String> {
         Some(d) => Ok(d.to_string()),
         None => std::env::current_dir()
             .map(|p| p.to_string_lossy().into_owned())
-            .map_err(|e| AgentError::Io(e)),
+            .map_err(AgentError::Io),
     }
 }
 

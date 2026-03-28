@@ -558,7 +558,6 @@ impl AttachmentsConfig {
     }
 }
 
-/// Computer Use configuration for desktop control via Anthropic's native tools.
 // ── Main config ──────────────────────────────────────────────────────────
 
 /// Main configuration for Starpod, loaded from `.starpod/config.toml` in the current directory.
@@ -1979,8 +1978,10 @@ mod tests {
 
     #[test]
     fn default_model_fallback_when_empty() {
-        let mut config = StarpodConfig::default();
-        config.models = vec![];
+        let config = StarpodConfig {
+            models: vec![],
+            ..StarpodConfig::default()
+        };
         assert_eq!(config.default_model(), ("anthropic", "claude-haiku-4-5"));
     }
 

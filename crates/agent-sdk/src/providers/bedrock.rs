@@ -751,7 +751,7 @@ mod tests {
         let messages = body["messages"].as_array().unwrap();
         let content = messages[0]["content"].as_array().unwrap();
         // name should be stripped (null) — Anthropic/Bedrock doesn't accept it
-        assert!(content[0].get("name").map_or(true, |v| v.is_null()));
+        assert!(content[0].get("name").is_none_or(|v| v.is_null()));
     }
 
     #[test]

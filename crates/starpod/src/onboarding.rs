@@ -104,7 +104,7 @@ pub fn run_wizard() -> Option<InitAnswers> {
     } else {
         let enable_web = Select::with_theme(&theme)
             .with_prompt("Enable web search? (requires a free Brave Search API key)")
-            .items(&["Yes", "No, skip for now"])
+            .items(["Yes", "No, skip for now"])
             .default(0)
             .interact_opt()
             .ok()
@@ -134,7 +134,7 @@ pub fn run_wizard() -> Option<InitAnswers> {
     // 5. Create first agent?
     let create_agent = Select::with_theme(&theme)
         .with_prompt("Create your first agent now?")
-        .items(&["Yes", "No, I'll do it later"])
+        .items(["Yes", "No, I'll do it later"])
         .default(0)
         .interact_opt()
         .ok()

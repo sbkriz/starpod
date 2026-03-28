@@ -1052,7 +1052,7 @@ impl StarpodAgent {
         // Step 4: Resolve model (may be overridden per-message) and build provider
         let (resolved_provider, resolved_model) = config
             .resolve_model(message.model.as_deref())
-            .map_err(|e| StarpodError::Config(e))?;
+            .map_err(StarpodError::Config)?;
         let provider = self.build_provider_for(&resolved_provider, &config).await?;
 
         // Attachment accumulator — populated by the Attach tool during the agent loop
@@ -1353,7 +1353,7 @@ impl StarpodAgent {
         // Resolve model (may be overridden per-message)
         let (resolved_provider, resolved_model) = config
             .resolve_model(message.model.as_deref())
-            .map_err(|e| StarpodError::Config(e))?;
+            .map_err(StarpodError::Config)?;
         let provider = self.build_provider_for(&resolved_provider, &config).await?;
 
         // Create the followup channel — sender goes to caller, receiver to the agent loop

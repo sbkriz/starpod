@@ -301,10 +301,10 @@ pub(crate) fn sse_stream(
                 }
             };
 
-            if line.starts_with("event:") {
-                current_event_type = line["event:".len()..].trim().to_string();
-            } else if line.starts_with("data:") {
-                let data = line["data:".len()..].trim();
+            if let Some(rest) = line.strip_prefix("event:") {
+                current_event_type = rest.trim().to_string();
+            } else if let Some(rest) = line.strip_prefix("data:") {
+                let data = rest.trim();
                 yield parse_stream_event(&current_event_type, data);
             }
         }
