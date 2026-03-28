@@ -2,24 +2,42 @@
 
 ## Prerequisites
 
-- **Rust 1.87+** — install via [rustup](https://rustup.rs/)
 - **An LLM provider** — Anthropic API key ([console.anthropic.com](https://console.anthropic.com/)), AWS Bedrock credentials, Google Vertex AI project, or any other [supported provider](/getting-started/configuration#provider-options)
 
-## Install from crates.io
+## Recommended
+
+```bash
+curl -fsSL https://starpod.sh/install | sh
+```
+
+This detects your OS and architecture, downloads the latest pre-built binary, and installs it to `~/.local/bin`.
+
+Options:
+- `--version=0.1.7` — pin to a specific version
+- `--no-homebrew` — skip Homebrew on macOS
+- `INSTALL_DIR=/usr/local/bin` — override install location
+
+## Homebrew (macOS/Linux)
+
+```bash
+brew install sinaptik-ai/tap/starpod
+```
+
+## From crates.io
+
+Requires **Rust 1.87+** ([rustup](https://rustup.rs/)).
 
 ```bash
 cargo install starpod
 ```
 
-## Install from Source
+## From Source
 
 ```bash
 git clone https://github.com/sinaptik-ai/starpod.git
 cd starpod
 cargo install --path crates/starpod --locked
 ```
-
-Both methods install the `starpod` binary to your Cargo bin directory (usually `~/.cargo/bin/`).
 
 ## Verify
 

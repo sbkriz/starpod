@@ -27,16 +27,29 @@ Starpod is an open-source AI agent runtime built in Rust. Bootstrap an agent in 
 ## Install
 
 ```bash
-cargo install starpod
+curl -fsSL https://starpod.sh/install | sh
 ```
 
-Or from source:
+Or via Homebrew:
 
 ```bash
+brew install sinaptik-ai/tap/starpod
+```
+
+<details>
+<summary>Other methods</summary>
+
+```bash
+# From crates.io
+cargo install starpod
+
+# From source
 git clone https://github.com/sinaptik-ai/starpod.git
 cd starpod
 cargo install --path crates/starpod --locked
 ```
+
+</details>
 
 ## Quick start
 

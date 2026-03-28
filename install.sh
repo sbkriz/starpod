@@ -1,6 +1,6 @@
 #!/bin/sh
 # Starpod installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/sinaptik-ai/starpod/main/install.sh | sh
+# Usage: curl -fsSL https://starpod.sh/install | sh
 # Options:
 #   --no-homebrew       Skip Homebrew even if available
 #   --version=VERSION   Install a specific version (default: latest)

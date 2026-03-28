@@ -1314,7 +1314,7 @@ async function installBeat() {
   installStage.classList.add('visible');
   await safeSleep(260);
   installCommand.classList.add('visible');
-  await typeTerminalCommand(installCommand, '~&gt;', 'cargo install starpod', 42);
+  await typeTerminalCommand(installCommand, '~&gt;', 'curl -fsSL starpod.sh/install | sh', 42);
   await safeSleep(220);
   installStatus.textContent = '✓ Starpod CLI installed';
   installStatus.classList.add('visible');
