@@ -97,18 +97,16 @@ export default function UsersTab() {
       if (r.ok) setApiKeys((await r.json()) || [])
     } catch {}
     setKeysLoading(false)
-    // Load telegram link
-    if (telegramEnabled) {
-      setTelegramLoading(true)
-      try {
-        const tr = await fetch(`/api/settings/auth/users/${encodeURIComponent(user.id)}/telegram`, { headers: apiHeaders() })
-        if (tr.ok) {
-          const data = await tr.json()
-          setTelegramLink(data.telegram_id ? data : null)
-        }
-      } catch {}
-      setTelegramLoading(false)
-    }
+    // Always try to load telegram link (telegramEnabled may still be loading)
+    setTelegramLoading(true)
+    try {
+      const tr = await fetch(`/api/settings/auth/users/${encodeURIComponent(user.id)}/telegram`, { headers: apiHeaders() })
+      if (tr.ok) {
+        const data = await tr.json()
+        setTelegramLink(data.telegram_id || data.username ? data : null)
+      }
+    } catch {}
+    setTelegramLoading(false)
   }
 
   const saveEdit = async () => {

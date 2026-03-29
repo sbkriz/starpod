@@ -16,6 +16,7 @@ use include_dir::{include_dir, Dir};
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use rust_embed::Embed;
 use tower_http::cors::CorsLayer;
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, info, warn};
 
@@ -228,8 +229,15 @@ async fn docs_handler(uri: Uri) -> Response {
 
 /// Build the Axum router with all routes.
 pub fn build_router(state: Arc<AppState>) -> Router {
+    let api = routes::api_routes(Arc::clone(&state)).layer(
+        SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            header::HeaderValue::from_static("no-store"),
+        ),
+    );
+
     Router::new()
-        .merge(routes::api_routes(Arc::clone(&state)))
+        .merge(api)
         .merge(ws::ws_routes())
         .route("/docs", get(docs_handler))
         .route("/docs/", get(docs_handler))
