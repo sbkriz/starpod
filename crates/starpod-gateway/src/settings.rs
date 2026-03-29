@@ -179,6 +179,11 @@ struct MemorySettings {
     export_sessions: bool,
     nudge_interval: u32,
     nudge_model: Option<String>,
+    /// Self-improve: background nudge also creates/updates skills.
+    /// Stored as a top-level field in agent.toml but exposed here because
+    /// it's tightly coupled with the background review feature.
+    #[serde(default)]
+    self_improve: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -604,6 +609,7 @@ async fn get_memory(State(state): State<Arc<AppState>>) -> ApiResult<MemorySetti
         export_sessions: cfg.memory.export_sessions,
         nudge_interval: cfg.memory.nudge_interval,
         nudge_model: cfg.memory.nudge_model.clone(),
+        self_improve: cfg.self_improve,
     }))
 }
 
@@ -655,6 +661,12 @@ async fn put_memory(
             mem.remove("nudge_model");
         }
     }
+
+    // self_improve is a top-level field (not under [memory])
+    table.insert(
+        "self_improve".into(),
+        toml::Value::Boolean(settings.self_improve),
+    );
 
     write_agent_toml(&state, &doc)?;
     Ok(ok_json())
@@ -2498,6 +2510,7 @@ mod tests {
             export_sessions: true,
             nudge_interval: 5,
             nudge_model: Some("anthropic/claude-haiku-4-5-20251001".into()),
+            self_improve: true,
         };
         let json = serde_json::to_string(&settings).unwrap();
         let back: MemorySettings = serde_json::from_str(&json).unwrap();
@@ -2508,6 +2521,24 @@ mod tests {
             back.nudge_model.as_deref(),
             Some("anthropic/claude-haiku-4-5-20251001")
         );
+        assert!(back.self_improve);
+    }
+
+    #[test]
+    fn memory_settings_self_improve_defaults_to_false() {
+        // Simulates a payload from an older frontend that doesn't send self_improve
+        let json = r#"{
+            "half_life_days": 30.0,
+            "mmr_lambda": 0.7,
+            "vector_search": false,
+            "chunk_size": 400,
+            "chunk_overlap": 80,
+            "export_sessions": false,
+            "nudge_interval": 10,
+            "nudge_model": null
+        }"#;
+        let back: MemorySettings = serde_json::from_str(json).unwrap();
+        assert!(!back.self_improve, "self_improve should default to false");
     }
 
     #[test]
@@ -2825,6 +2856,41 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["nudge_interval"], 5);
         assert_eq!(json["nudge_model"], "anthropic/claude-haiku-4-5-20251001");
+        // self_improve defaults to false when not sent
+        assert_eq!(json["self_improve"], false);
+    }
+
+    #[tokio::test]
+    async fn put_memory_self_improve_writes_top_level_toml() {
+        let (_tmp, state) = test_app_state().await;
+
+        // PUT with self_improve enabled
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/memory",
+            serde_json::json!({
+                "half_life_days": 30.0, "mmr_lambda": 0.7, "vector_search": false,
+                "chunk_size": 400, "chunk_overlap": 80, "export_sessions": false,
+                "nudge_interval": 10, "nudge_model": null, "self_improve": true
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Verify self_improve is written to top-level of agent.toml (not under [memory])
+        let content = std::fs::read_to_string(&state.paths.agent_toml).unwrap();
+        let parsed: toml::Value = toml::from_str(&content).unwrap();
+        assert_eq!(parsed["self_improve"].as_bool(), Some(true));
+        // Should NOT be under [memory]
+        assert!(parsed["memory"].get("self_improve").is_none());
+
+        // Reload and GET should reflect it
+        let agent_cfg = starpod_core::reload_agent_config(&state.paths).unwrap();
+        *state.config.write().unwrap() = agent_cfg.into_starpod_config(&state.paths);
+
+        let (status, json) = get_json(state, "/api/settings/memory").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["self_improve"], true);
     }
 
     #[tokio::test]

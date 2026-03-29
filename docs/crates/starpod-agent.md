@@ -43,7 +43,7 @@ let attachments = out_attachments.lock().await.drain(..).collect::<Vec<_>>();
 8. **Self-improve reflection** — if `self_improve` is enabled and conditions are met (skill failure or 5+ tool calls), run a follow-up query to create/update skills
 9. **Record usage** — tokens and cost to session database
 10. **Append daily log** — conversation summary
-11. **Background memory nudge** — if message count hits the nudge interval, spawn a background review
+11. **Background nudge** — if message count hits the nudge interval, spawn a background review (memory + skills when self-improve is on)
 
 ## Followup Message Handling
 
@@ -106,7 +106,7 @@ Memory persistence operates at two levels:
 The nudge pipeline:
 1. `StarpodAgent` tracks a per-session message counter (`nudge_counters`)
 2. When `count % nudge_interval == 0`, `maybe_nudge_memory()` loads the session transcript
-3. A background task calls `nudge::run_memory_nudge()` which:
+3. A background task calls `nudge::run_nudge()` which:
    - Converts `SessionMessage` records into a transcript (truncated to 30K chars)
    - Makes a single non-streaming LLM call with `MemoryWrite` / `MemoryAppendDaily` tools
    - Executes any tool calls from the response (reuses `flush::execute_flush_tool_calls`)

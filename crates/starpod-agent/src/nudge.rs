@@ -1,10 +1,15 @@
-//! Background memory nudge — periodically reviews the conversation and persists
-//! important information to durable memory.
+//! Background nudge — periodically reviews the conversation and persists
+//! important information to durable memory and, optionally, skills.
 //!
 //! Every [`nudge_interval`](starpod_core::MemoryConfig::nudge_interval) user
 //! messages, a lightweight LLM call reviews the recent conversation transcript
 //! (pulled from session messages) and uses `MemoryWrite` / `MemoryAppendDaily`
 //! tools to save anything worth keeping.
+//!
+//! When **self-improve** is enabled, the same background call also receives
+//! `SkillCreate` / `SkillUpdate` tools and guidance for extracting reusable
+//! skills from complex tasks — unifying memory and skill learning in a single
+//! pass.
 //!
 //! Unlike the pre-compaction flush ([`flush`](crate::flush)) which fires when
 //! the context window fills, the nudge runs **proactively** on a cadence so
@@ -17,11 +22,14 @@
 //!    (`nudge_counters`). After each user message, the counter increments.
 //! 2. When `count % nudge_interval == 0`, [`StarpodAgent::maybe_nudge_memory`]
 //!    loads the full session transcript from the database.
-//! 3. A background `tokio::spawn` task calls [`run_memory_nudge`] which:
+//! 3. A background `tokio::spawn` task calls [`run_nudge`] which:
 //!    - Converts `SessionMessage` records into a human-readable transcript
-//!    - Makes a single non-streaming LLM call with memory tools
+//!    - Makes a single non-streaming LLM call with memory tools (and skill
+//!      tools when self-improve is on)
 //!    - Executes any `MemoryWrite` / `MemoryAppendDaily` tool calls from the
 //!      response (via [`flush::execute_flush_tool_calls`])
+//!    - Executes any `SkillCreate` / `SkillUpdate` tool calls against the
+//!      [`SkillStore`](starpod_skills::SkillStore)
 //!    - Discards the LLM's text output — only tool calls matter
 //!
 //! # Configuration
@@ -30,6 +38,8 @@
 //!   set to `0` to disable
 //! - `memory.nudge_model` — model override; falls back to
 //!   `compaction.flush_model` → `compaction_model` → primary model
+//! - `self_improve` (top-level) — when `true`, skill tools are included in the
+//!   nudge call
 //!
 //! # Failure mode
 //!
@@ -40,22 +50,25 @@ use std::sync::Arc;
 
 use tracing::{debug, warn};
 
-use agent_sdk::client::{ApiContentBlock, ApiMessage, CreateMessageRequest, SystemBlock};
+use agent_sdk::client::{
+    ApiContentBlock, ApiMessage, CreateMessageRequest, SystemBlock, ToolDefinition,
+};
 use agent_sdk::LlmProvider;
 use starpod_memory::MemoryStore;
 use starpod_memory::UserMemoryView;
 use starpod_session::SessionMessage;
+use starpod_skills::SkillStore;
 
 use crate::flush;
 
-/// System prompt for the background memory nudge.
+/// Base system prompt for the background nudge (memory-only portion).
 ///
 /// Instructs the LLM to act as a memory management agent, reviewing the
 /// conversation transcript and deciding what to persist. Guides routing:
 /// user details → `USER.md`, factual knowledge → `MEMORY.md`, temporal
 /// notes → daily log.
 const NUDGE_SYSTEM_PROMPT: &str = "\
-You are a memory management agent. Your ONLY job is to review the recent conversation \
+You are a background review agent. Your ONLY job is to review the recent conversation \
 and save important information using the provided tools. Be selective — only save \
 information that would be useful in future conversations.
 
@@ -79,6 +92,147 @@ If there is nothing worth saving, respond with a single text message saying \
 Use MemoryWrite with append=true to add to MEMORY.md or USER.md. \
 Use MemoryAppendDaily for time-specific notes and conversation summaries. \
 Respond with ONLY tool calls (or \"Nothing to save\"), no other text.";
+
+/// Additional system prompt appended when self-improve is enabled.
+///
+/// Guides the nudge LLM to also create or update skills when the conversation
+/// contains complex workflows, non-trivial patterns, or reveals that an
+/// existing skill is outdated.
+const NUDGE_SKILL_PROMPT: &str = "\n\n\
+--- SKILL SELF-IMPROVE ---\n\
+You also have skill management tools. Review the conversation for skill opportunities:\n\n\
+SKILL CREATION:\n\
+If the conversation involved a complex task (roughly 5+ tool calls), a tricky error fix, \
+or a non-trivial workflow, save the approach as a reusable skill with SkillCreate. \
+Include clear steps, context on when to use it, and pitfalls encountered. \
+Do NOT create skills for trivial or one-off tasks.\n\n\
+SKILL UPDATES:\n\
+If the conversation used an existing skill and found it outdated, incomplete, or wrong, \
+update it with SkillUpdate. Skills that aren't maintained become liabilities.\n\n\
+Skill names must be lowercase letters, digits, and hyphens only (e.g. 'summarize-pr').";
+
+/// Tool definitions for `SkillCreate` and `SkillUpdate`, used by the nudge
+/// when self-improve is enabled.
+fn skill_tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition {
+            name: "SkillCreate".into(),
+            description: "Create a new reusable skill. Skills are SKILL.md files with YAML \
+                          frontmatter (name, description) and a markdown body."
+                .into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Skill name (lowercase letters, digits, hyphens only, e.g. 'summarize-pr')"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "What the skill does and when to use it"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Markdown instructions for the skill"
+                    }
+                },
+                "required": ["name", "description", "body"]
+            }),
+            cache_control: None,
+        },
+        ToolDefinition {
+            name: "SkillUpdate".into(),
+            description: "Update an existing skill's description and instructions.".into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Name of the skill to update"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "New description for the skill"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "New markdown instructions for the skill"
+                    }
+                },
+                "required": ["name", "description", "body"]
+            }),
+            cache_control: None,
+        },
+    ]
+}
+
+/// Build the full system prompt for the nudge, optionally including skill
+/// guidance and the current skill catalog.
+fn build_nudge_system_prompt(skills: Option<&SkillStore>) -> String {
+    let mut prompt = NUDGE_SYSTEM_PROMPT.to_string();
+
+    if let Some(store) = skills {
+        prompt.push_str(NUDGE_SKILL_PROMPT);
+
+        // Include existing skill catalog so the LLM knows what already exists
+        if let Ok(catalog) = store.skill_catalog() {
+            if !catalog.is_empty() {
+                prompt.push_str("\n\nExisting skills (update these rather than creating duplicates):\n");
+                prompt.push_str(&catalog);
+            }
+        }
+    }
+
+    prompt
+}
+
+/// Execute `SkillCreate` / `SkillUpdate` tool calls from the LLM response.
+///
+/// Skips unknown tool names silently (memory tools are handled separately by
+/// [`flush::execute_flush_tool_calls`]).
+fn execute_skill_tool_calls(content: &[ApiContentBlock], skills: &SkillStore) {
+    for block in content {
+        if let ApiContentBlock::ToolUse { name, input, id } = block {
+            match name.as_str() {
+                "SkillCreate" => {
+                    let Some(skill_name) = input.get("name").and_then(|v| v.as_str()) else {
+                        continue;
+                    };
+                    let Some(description) = input.get("description").and_then(|v| v.as_str())
+                    else {
+                        continue;
+                    };
+                    let Some(body) = input.get("body").and_then(|v| v.as_str()) else {
+                        continue;
+                    };
+
+                    debug!(tool_id = %id, skill = %skill_name, "Nudge: creating skill");
+                    if let Err(e) = skills.create(skill_name, description, None, None, body) {
+                        warn!(skill = %skill_name, error = %e, "Nudge: SkillCreate failed");
+                    }
+                }
+                "SkillUpdate" => {
+                    let Some(skill_name) = input.get("name").and_then(|v| v.as_str()) else {
+                        continue;
+                    };
+                    let Some(description) = input.get("description").and_then(|v| v.as_str())
+                    else {
+                        continue;
+                    };
+                    let Some(body) = input.get("body").and_then(|v| v.as_str()) else {
+                        continue;
+                    };
+
+                    debug!(tool_id = %id, skill = %skill_name, "Nudge: updating skill");
+                    if let Err(e) = skills.update(skill_name, description, None, None, body) {
+                        warn!(skill = %skill_name, error = %e, "Nudge: SkillUpdate failed");
+                    }
+                }
+                _ => {} // Memory tools handled by flush::execute_flush_tool_calls
+            }
+        }
+    }
+}
 
 /// Maximum transcript length sent to the nudge LLM (characters).
 const MAX_TRANSCRIPT_LEN: usize = 30_000;
@@ -115,10 +269,14 @@ fn session_messages_to_transcript(messages: &[SessionMessage]) -> String {
     parts.join("\n\n")
 }
 
-/// Run the background memory nudge.
+/// Run the background nudge.
 ///
 /// Builds a transcript from `messages`, sends it to the LLM via a single
-/// non-streaming call, then executes any memory tool calls from the response.
+/// non-streaming call, then executes any tool calls from the response.
+///
+/// When `skills` is `Some`, the nudge also includes `SkillCreate` /
+/// `SkillUpdate` tools and guidance for extracting reusable skills from
+/// complex tasks (self-improve mode).
 ///
 /// # Arguments
 ///
@@ -128,18 +286,20 @@ fn session_messages_to_transcript(messages: &[SessionMessage]) -> String {
 /// * `memory` — agent-level memory store (writes land here when no user view)
 /// * `user_view` — per-user memory view; when present, writes route to the
 ///   user's directory instead of the agent-level store
+/// * `skills` — when `Some`, skill tools are included (self-improve mode)
 ///
 /// # Errors
 ///
 /// This function is fail-open: provider errors are logged as warnings, and
 /// the caller is not notified. This ensures the nudge never disrupts the
 /// main chat flow.
-pub async fn run_memory_nudge(
+pub async fn run_nudge(
     provider: Arc<dyn LlmProvider>,
     model: &str,
     messages: &[SessionMessage],
     memory: &MemoryStore,
     user_view: Option<&UserMemoryView>,
+    skills: Option<&SkillStore>,
 ) {
     let transcript = session_messages_to_transcript(messages);
     if transcript.trim().is_empty() {
@@ -157,6 +317,14 @@ pub async fn run_memory_nudge(
         transcript
     };
 
+    // Build tools: always memory, optionally skills
+    let mut tools = flush::flush_tool_definitions();
+    if skills.is_some() {
+        tools.extend(skill_tool_definitions());
+    }
+
+    let system_prompt = build_nudge_system_prompt(skills);
+
     let request = CreateMessageRequest {
         model: model.to_string(),
         max_tokens: 4096,
@@ -164,7 +332,7 @@ pub async fn run_memory_nudge(
             role: "user".into(),
             content: vec![ApiContentBlock::Text {
                 text: format!(
-                    "Review this recent conversation and save important information to memory:\n\n{}",
+                    "Review this recent conversation and save important information:\n\n{}",
                     transcript
                 ),
                 cache_control: None,
@@ -172,16 +340,17 @@ pub async fn run_memory_nudge(
         }],
         system: Some(vec![SystemBlock {
             kind: "text".into(),
-            text: NUDGE_SYSTEM_PROMPT.to_string(),
+            text: system_prompt,
             cache_control: None,
         }]),
-        tools: Some(flush::flush_tool_definitions()),
+        tools: Some(tools),
         stream: false,
         metadata: None,
         thinking: None,
     };
 
-    debug!(model = %model, transcript_len = transcript.len(), messages = messages.len(), "Running memory nudge");
+    let self_improve = skills.is_some();
+    debug!(model = %model, self_improve, transcript_len = transcript.len(), messages = messages.len(), "Running background nudge");
 
     match provider.create_message(&request).await {
         Ok(response) => {
@@ -195,10 +364,15 @@ pub async fn run_memory_nudge(
             } else {
                 debug!(tool_calls = tool_calls.len(), "Nudge: executing tool calls");
             }
+            // Execute memory tool calls
             flush::execute_flush_tool_calls(&response.content, memory, user_view).await;
+            // Execute skill tool calls (no-op when skills is None)
+            if let Some(store) = skills {
+                execute_skill_tool_calls(&response.content, store);
+            }
         }
         Err(e) => {
-            warn!(error = %e, "Memory nudge LLM call failed");
+            warn!(error = %e, "Background nudge LLM call failed");
         }
     }
 }
@@ -317,7 +491,7 @@ mod tests {
         // The raw transcript should be large
         assert!(transcript.len() > MAX_TRANSCRIPT_LEN);
 
-        // Now simulate the capping logic from run_memory_nudge
+        // Now simulate the capping logic from run_nudge
         let capped = if transcript.len() > MAX_TRANSCRIPT_LEN {
             let mut end = MAX_TRANSCRIPT_LEN;
             while end > 0 && !transcript.is_char_boundary(end) {
@@ -412,7 +586,7 @@ mod tests {
         }
     }
 
-    // ── run_memory_nudge integration tests ───────────────────────────
+    // ── run_nudge integration tests ───────────────────────────
 
     #[tokio::test]
     async fn nudge_executes_memory_write_tool_call() {
@@ -440,7 +614,7 @@ mod tests {
             ),
         ];
 
-        run_memory_nudge(provider, "test-model", &messages, &store, None).await;
+        run_nudge(provider, "test-model", &messages, &store, None, None).await;
 
         let content = store.read_file("MEMORY.md").unwrap();
         assert!(
@@ -472,7 +646,7 @@ mod tests {
             ),
         ];
 
-        run_memory_nudge(provider, "test-model", &messages, &store, None).await;
+        run_nudge(provider, "test-model", &messages, &store, None, None).await;
 
         let results = store.search("event sourcing", 5).await.unwrap();
         assert!(!results.is_empty(), "Daily log entry should be searchable");
@@ -507,7 +681,7 @@ mod tests {
             msg(2, "assistant", "Nice to meet you, Alice!"),
         ];
 
-        run_memory_nudge(provider, "test-model", &messages, &store, None).await;
+        run_nudge(provider, "test-model", &messages, &store, None, None).await;
 
         let user = store.read_file("USER.md").unwrap();
         assert!(user.contains("Alice"), "USER.md should contain user's name");
@@ -535,7 +709,7 @@ mod tests {
         let messages = vec![msg(1, "user", "Hi"), msg(2, "assistant", "Hello!")];
 
         // Should not panic or write anything
-        run_memory_nudge(provider, "test-model", &messages, &store, None).await;
+        run_nudge(provider, "test-model", &messages, &store, None, None).await;
     }
 
     #[tokio::test]
@@ -547,7 +721,7 @@ mod tests {
         let messages = vec![msg(1, "user", "Important info here")];
 
         // Should not panic — fail-open
-        run_memory_nudge(provider, "test-model", &messages, &store, None).await;
+        run_nudge(provider, "test-model", &messages, &store, None, None).await;
     }
 
     #[tokio::test]
@@ -560,7 +734,7 @@ mod tests {
         let messages: Vec<SessionMessage> = vec![];
 
         // Should return immediately without calling the provider
-        run_memory_nudge(provider, "test-model", &messages, &store, None).await;
+        run_nudge(provider, "test-model", &messages, &store, None, None).await;
     }
 
     #[tokio::test]
@@ -585,12 +759,13 @@ mod tests {
         let provider = Arc::new(MockProvider::with_response(response));
         let messages = vec![msg(1, "user", "I use vim keybindings everywhere")];
 
-        run_memory_nudge(
+        run_nudge(
             provider,
             "test-model",
             &messages,
             &agent_store,
             Some(&user_view),
+            None,
         )
         .await;
 
@@ -703,8 +878,8 @@ mod tests {
                 assert!(request.system.is_some(), "System prompt should be present");
                 let sys = &request.system.as_ref().unwrap()[0].text;
                 assert!(
-                    sys.contains("memory management agent"),
-                    "System prompt should identify as memory agent"
+                    sys.contains("background review agent"),
+                    "System prompt should identify as background review agent"
                 );
 
                 // Verify tools are present
@@ -768,7 +943,7 @@ mod tests {
             msg(2, "assistant", "Noted!"),
         ];
 
-        run_memory_nudge(provider_dyn, "test-model", &messages, &store, None).await;
+        run_nudge(provider_dyn, "test-model", &messages, &store, None, None).await;
         assert!(
             provider.called.load(Ordering::SeqCst),
             "Provider should have been called"
@@ -790,5 +965,242 @@ mod tests {
     fn max_transcript_len_is_reasonable() {
         assert_eq!(MAX_TRANSCRIPT_LEN, 30_000);
         assert_eq!(MAX_MESSAGE_LEN, 1_000);
+    }
+
+    // ── self-improve / skill integration ───────────────────────────
+
+    #[test]
+    fn skill_prompt_mentions_key_tools() {
+        assert!(NUDGE_SKILL_PROMPT.contains("SkillCreate"));
+        assert!(NUDGE_SKILL_PROMPT.contains("SkillUpdate"));
+    }
+
+    #[test]
+    fn skill_tool_definitions_has_create_and_update() {
+        let tools = skill_tool_definitions();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].name, "SkillCreate");
+        assert_eq!(tools[1].name, "SkillUpdate");
+    }
+
+    #[test]
+    fn build_system_prompt_without_skills_is_base_only() {
+        let prompt = build_nudge_system_prompt(None);
+        assert_eq!(prompt, NUDGE_SYSTEM_PROMPT);
+        assert!(!prompt.contains("SkillCreate"));
+    }
+
+    #[test]
+    fn build_system_prompt_with_skills_includes_skill_guidance() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = SkillStore::new(tmp.path()).unwrap();
+        let prompt = build_nudge_system_prompt(Some(&store));
+        assert!(prompt.starts_with(NUDGE_SYSTEM_PROMPT));
+        assert!(prompt.contains("SKILL SELF-IMPROVE"));
+        assert!(prompt.contains("SkillCreate"));
+        assert!(prompt.contains("SkillUpdate"));
+    }
+
+    #[test]
+    fn build_system_prompt_with_existing_skills_includes_catalog() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = SkillStore::new(tmp.path()).unwrap();
+        store
+            .create("summarize-pr", "Summarize a GitHub PR", None, None, "Steps:\n1. Read PR\n2. Summarize")
+            .unwrap();
+        let prompt = build_nudge_system_prompt(Some(&store));
+        assert!(prompt.contains("summarize-pr"));
+        assert!(prompt.contains("Existing skills"));
+    }
+
+    #[test]
+    fn execute_skill_tool_calls_creates_skill() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = SkillStore::new(tmp.path()).unwrap();
+
+        let content = vec![ApiContentBlock::ToolUse {
+            id: "tool_1".into(),
+            name: "SkillCreate".into(),
+            input: serde_json::json!({
+                "name": "deploy-check",
+                "description": "Verify deployment readiness",
+                "body": "Steps:\n1. Run tests\n2. Check config"
+            }),
+        }];
+
+        execute_skill_tool_calls(&content, &store);
+
+        let skills = store.list().unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "deploy-check");
+    }
+
+    #[test]
+    fn execute_skill_tool_calls_updates_skill() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = SkillStore::new(tmp.path()).unwrap();
+        store
+            .create("deploy-check", "Old description", None, None, "Old body")
+            .unwrap();
+
+        let content = vec![ApiContentBlock::ToolUse {
+            id: "tool_1".into(),
+            name: "SkillUpdate".into(),
+            input: serde_json::json!({
+                "name": "deploy-check",
+                "description": "Updated description",
+                "body": "Updated body"
+            }),
+        }];
+
+        execute_skill_tool_calls(&content, &store);
+
+        let skills = store.list().unwrap();
+        assert_eq!(skills[0].description, "Updated description");
+    }
+
+    #[test]
+    fn execute_skill_tool_calls_ignores_memory_tools() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = SkillStore::new(tmp.path()).unwrap();
+
+        let content = vec![
+            ApiContentBlock::ToolUse {
+                id: "tool_1".into(),
+                name: "MemoryWrite".into(),
+                input: serde_json::json!({"file": "MEMORY.md", "content": "test"}),
+            },
+            ApiContentBlock::ToolUse {
+                id: "tool_2".into(),
+                name: "MemoryAppendDaily".into(),
+                input: serde_json::json!({"text": "test"}),
+            },
+        ];
+
+        // Should not panic — memory tools are silently skipped
+        execute_skill_tool_calls(&content, &store);
+        assert!(store.list().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn nudge_executes_skill_create_when_skills_provided() {
+        let mem_tmp = tempfile::TempDir::new().unwrap();
+        let skill_tmp = tempfile::TempDir::new().unwrap();
+        let mem_store = MemoryStore::new_user(mem_tmp.path()).await.unwrap();
+        let skill_store = SkillStore::new(skill_tmp.path()).unwrap();
+
+        let response = mock_response_with_tool_calls(vec![ApiContentBlock::ToolUse {
+            id: "tool_1".into(),
+            name: "SkillCreate".into(),
+            input: serde_json::json!({
+                "name": "debug-crash",
+                "description": "Debug application crashes",
+                "body": "1. Check logs\n2. Reproduce\n3. Fix"
+            }),
+        }]);
+
+        let provider = Arc::new(MockProvider::with_response(response));
+        let messages = vec![
+            msg(1, "user", "The app keeps crashing on startup"),
+            msg(2, "assistant", "I found the issue — a null pointer in init()."),
+            msg(3, "user", "Thanks, that fixed it!"),
+        ];
+
+        run_nudge(
+            provider,
+            "test-model",
+            &messages,
+            &mem_store,
+            None,
+            Some(&skill_store),
+        )
+        .await;
+
+        let skills = skill_store.list().unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "debug-crash");
+    }
+
+    #[tokio::test]
+    async fn nudge_handles_mixed_memory_and_skill_calls() {
+        let mem_tmp = tempfile::TempDir::new().unwrap();
+        let skill_tmp = tempfile::TempDir::new().unwrap();
+        let mem_store = MemoryStore::new_user(mem_tmp.path()).await.unwrap();
+        mem_store
+            .write_file("MEMORY.md", "# Memory\n")
+            .await
+            .unwrap();
+        let skill_store = SkillStore::new(skill_tmp.path()).unwrap();
+
+        let response = mock_response_with_tool_calls(vec![
+            ApiContentBlock::ToolUse {
+                id: "tool_1".into(),
+                name: "MemoryWrite".into(),
+                input: serde_json::json!({
+                    "file": "MEMORY.md",
+                    "content": "\n- User prefers monorepo structure.",
+                    "append": true
+                }),
+            },
+            ApiContentBlock::ToolUse {
+                id: "tool_2".into(),
+                name: "SkillCreate".into(),
+                input: serde_json::json!({
+                    "name": "setup-monorepo",
+                    "description": "Set up a Rust workspace monorepo",
+                    "body": "1. Create workspace Cargo.toml\n2. Add crates"
+                }),
+            },
+        ]);
+
+        let provider = Arc::new(MockProvider::with_response(response));
+        let messages = vec![
+            msg(1, "user", "Help me set up a monorepo"),
+            msg(2, "assistant", "Done! Created workspace with 3 crates."),
+        ];
+
+        run_nudge(
+            provider,
+            "test-model",
+            &messages,
+            &mem_store,
+            None,
+            Some(&skill_store),
+        )
+        .await;
+
+        // Memory was written
+        let memory = mem_store.read_file("MEMORY.md").unwrap();
+        assert!(memory.contains("monorepo"));
+
+        // Skill was created
+        let skills = skill_store.list().unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "setup-monorepo");
+    }
+
+    #[tokio::test]
+    async fn nudge_skips_skills_when_none() {
+        let mem_tmp = tempfile::TempDir::new().unwrap();
+        let mem_store = MemoryStore::new_user(mem_tmp.path()).await.unwrap();
+
+        // Response includes a SkillCreate call, but skills is None
+        let response = mock_response_with_tool_calls(vec![ApiContentBlock::ToolUse {
+            id: "tool_1".into(),
+            name: "SkillCreate".into(),
+            input: serde_json::json!({
+                "name": "should-not-exist",
+                "description": "This should not be created",
+                "body": "nope"
+            }),
+        }]);
+
+        let provider = Arc::new(MockProvider::with_response(response));
+        let messages = vec![msg(1, "user", "test")];
+
+        // skills = None, so SkillCreate should be ignored
+        run_nudge(provider, "test-model", &messages, &mem_store, None, None).await;
+
+        // No way to verify skill wasn't created without a store — but no panic is the key check
     }
 }

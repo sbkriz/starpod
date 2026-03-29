@@ -20,7 +20,7 @@ server_addr = "127.0.0.1:3000"        # HTTP/WS server bind address
 # compaction_model = "anthropic/claude-haiku-4-5"  # Model for summarizing old messages
 # timezone = "Europe/Rome"            # IANA timezone for cron scheduling
 # followup_mode = "inject"            # "inject" or "queue"
-# self_improve = false                # Beta: auto-create skills from complex tasks
+# self_improve = false                # Beta: background review also creates/updates skills
 
 # ─── Providers ─────────────────────────────────────────
 # API keys are stored in the encrypted vault.
@@ -104,7 +104,7 @@ server_addr = "127.0.0.1:3000"        # HTTP/WS server bind address
 | `reasoning_effort` | string | — | Extended thinking: `"low"`, `"medium"`, `"high"` |
 | `compaction_model` | string | primary model | Model for conversation compaction summaries |
 | `followup_mode` | string | `"inject"` | How followup messages are handled: `"inject"` or `"queue"` |
-| `self_improve` | bool | `false` | Beta: agent proactively creates skills from complex tasks |
+| `self_improve` | bool | `false` | Beta: background reviews also create/update skills; agent gets inline skill guidance |
 
 ## Agent Personality & User Profile
 
@@ -198,7 +198,7 @@ The `[memory]` section tunes search and indexing behavior.
 | `chunk_overlap` | integer | `320` | Overlap in characters between chunks (~80 tokens) |
 | `bootstrap_file_cap` | integer | `20000` | Max characters per file included in bootstrap context |
 | `export_sessions` | bool | `true` | Export closed session transcripts to memory for long-term recall |
-| `nudge_interval` | integer | `10` | Background memory review every N user messages (`0` = disabled) |
+| `nudge_interval` | integer | `10` | Background review every N user messages (`0` = disabled). Reviews memory and skills (when `self_improve` is on) |
 | `nudge_model` | string | — | Model for background reviews (falls back to flush → compaction → primary model) |
 
 ## Compaction

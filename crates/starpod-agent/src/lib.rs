@@ -1491,8 +1491,11 @@ impl StarpodAgent {
         self.maybe_nudge_memory(session_id, user_id, &config).await;
     }
 
-    /// Increment the nudge counter for a session and spawn a background memory
+    /// Increment the nudge counter for a session and spawn a background
     /// review if the interval has been reached.
+    ///
+    /// When `self_improve` is enabled, the nudge also includes skill tools
+    /// so the background LLM can create or update skills from the conversation.
     ///
     /// Returns immediately — the nudge runs in a detached `tokio::spawn` task.
     async fn maybe_nudge_memory(
@@ -1535,7 +1538,7 @@ impl StarpodAgent {
         let provider: Arc<dyn agent_sdk::LlmProvider> = match self.build_provider(config).await {
             Ok(p) => Arc::from(p),
             Err(e) => {
-                warn!(error = %e, "Failed to build provider for memory nudge");
+                warn!(error = %e, "Failed to build provider for background nudge");
                 return;
             }
         };
@@ -1552,15 +1555,24 @@ impl StarpodAgent {
             None => None,
         };
 
-        info!(session_id, count, "Spawning background memory nudge");
+        // When self-improve is on, pass skills to the nudge for unified review
+        let skills = if config.self_improve {
+            Some(Arc::clone(&self.skills))
+        } else {
+            None
+        };
+
+        let self_improve = config.self_improve;
+        info!(session_id, count, self_improve, "Spawning background nudge");
 
         tokio::spawn(async move {
-            nudge::run_memory_nudge(
+            nudge::run_nudge(
                 provider,
                 &nudge_model,
                 &messages,
                 &memory,
                 user_view.as_deref(),
+                skills.as_deref(),
             )
             .await;
         });
