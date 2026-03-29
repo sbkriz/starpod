@@ -25,11 +25,11 @@
 //! 3. When a session closes with un-nudged messages (counter > 0 but hasn't
 //!    hit the interval), a **final nudge** runs so short conversations are
 //!    never lost.
-//! 3b. When a user sends a message to any session,
+//! 4. When a user sends a message to any session,
 //!    [`StarpodAgent::flush_stale_sessions`] checks for other sessions
 //!    belonging to the same user with un-nudged messages and flushes them.
 //!    This catches the web UI pattern where sessions are never closed.
-//! 4. A background `tokio::spawn` task calls [`run_nudge`] which:
+//! 5. A background `tokio::spawn` task calls [`run_nudge`] which:
 //!    - Converts `SessionMessage` records into a human-readable transcript
 //!    - Makes a single non-streaming LLM call with memory tools (and skill
 //!      tools when self-improve is on)
@@ -184,7 +184,9 @@ fn build_nudge_system_prompt(skills: Option<&SkillStore>) -> String {
         // Include existing skill catalog so the LLM knows what already exists
         if let Ok(catalog) = store.skill_catalog() {
             if !catalog.is_empty() {
-                prompt.push_str("\n\nExisting skills (update these rather than creating duplicates):\n");
+                prompt.push_str(
+                    "\n\nExisting skills (update these rather than creating duplicates):\n",
+                );
                 prompt.push_str(&catalog);
             }
         }
@@ -876,7 +878,11 @@ mod tests {
             ("sess-c", "bob", 5),
         ];
         let stale = simulate_stale_flush(&sessions, "sess-b", "alice", 10);
-        assert_eq!(stale, vec!["sess-a"], "Only alice's other un-nudged session");
+        assert_eq!(
+            stale,
+            vec!["sess-a"],
+            "Only alice's other un-nudged session"
+        );
     }
 
     #[test]
@@ -888,10 +894,7 @@ mod tests {
 
     #[test]
     fn stale_flush_skips_other_users() {
-        let sessions = vec![
-            ("sess-a", "bob", 3),
-            ("sess-b", "charlie", 7),
-        ];
+        let sessions = vec![("sess-a", "bob", 3), ("sess-b", "charlie", 7)];
         let stale = simulate_stale_flush(&sessions, "sess-new", "alice", 10);
         assert!(stale.is_empty(), "Should not flush other users' sessions");
     }
@@ -913,7 +916,10 @@ mod tests {
             ("sess-a", "alice", 0), // already flushed
         ];
         let stale = simulate_stale_flush(&sessions, "sess-new", "alice", 10);
-        assert!(stale.is_empty(), "Zero-count sessions should not be flushed again");
+        assert!(
+            stale.is_empty(),
+            "Zero-count sessions should not be flushed again"
+        );
     }
 
     #[test]
@@ -1097,7 +1103,13 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let store = SkillStore::new(tmp.path()).unwrap();
         store
-            .create("summarize-pr", "Summarize a GitHub PR", None, None, "Steps:\n1. Read PR\n2. Summarize")
+            .create(
+                "summarize-pr",
+                "Summarize a GitHub PR",
+                None,
+                None,
+                "Steps:\n1. Read PR\n2. Summarize",
+            )
             .unwrap();
         let prompt = build_nudge_system_prompt(Some(&store));
         assert!(prompt.contains("summarize-pr"));
@@ -1193,7 +1205,11 @@ mod tests {
         let provider = Arc::new(MockProvider::with_response(response));
         let messages = vec![
             msg(1, "user", "The app keeps crashing on startup"),
-            msg(2, "assistant", "I found the issue — a null pointer in init()."),
+            msg(
+                2,
+                "assistant",
+                "I found the issue — a null pointer in init().",
+            ),
             msg(3, "user", "Thanks, that fixed it!"),
         ];
 

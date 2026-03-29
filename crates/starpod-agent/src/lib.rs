@@ -2991,9 +2991,21 @@ mod tests {
         // sess-a2 is current, should be untouched
         // sess-b1 belongs to bob, should be untouched
         let counters = agent.nudge_counters.read().await;
-        assert_eq!(counters.get("sess-a1").unwrap().1, 0, "sess-a1 should be reset after flush");
-        assert_eq!(counters.get("sess-a2").unwrap().1, 5, "current session should be untouched");
-        assert_eq!(counters.get("sess-b1").unwrap().1, 7, "other user's session should be untouched");
+        assert_eq!(
+            counters.get("sess-a1").unwrap().1,
+            0,
+            "sess-a1 should be reset after flush"
+        );
+        assert_eq!(
+            counters.get("sess-a2").unwrap().1,
+            5,
+            "current session should be untouched"
+        );
+        assert_eq!(
+            counters.get("sess-b1").unwrap().1,
+            7,
+            "other user's session should be untouched"
+        );
     }
 
     #[tokio::test]
@@ -3016,9 +3028,21 @@ mod tests {
             .await;
 
         let counters = agent.nudge_counters.read().await;
-        assert_eq!(counters.get("sess-1").unwrap().1, 10, "at interval boundary, should not flush");
-        assert_eq!(counters.get("sess-2").unwrap().1, 20, "at interval boundary, should not flush");
-        assert_eq!(counters.get("sess-3").unwrap().1, 0, "stale session should be flushed");
+        assert_eq!(
+            counters.get("sess-1").unwrap().1,
+            10,
+            "at interval boundary, should not flush"
+        );
+        assert_eq!(
+            counters.get("sess-2").unwrap().1,
+            20,
+            "at interval boundary, should not flush"
+        );
+        assert_eq!(
+            counters.get("sess-3").unwrap().1,
+            0,
+            "stale session should be flushed"
+        );
     }
 
     #[tokio::test]
@@ -3105,13 +3129,19 @@ mod tests {
         agent
             .flush_stale_sessions("sess-new", "alice", &config)
             .await;
-        assert_eq!(agent.nudge_counters.read().await.get("sess-old").unwrap().1, 0);
+        assert_eq!(
+            agent.nudge_counters.read().await.get("sess-old").unwrap().1,
+            0
+        );
 
         // Second flush should be a no-op (count is 0, so filter excludes it)
         agent
             .flush_stale_sessions("sess-another", "alice", &config)
             .await;
-        assert_eq!(agent.nudge_counters.read().await.get("sess-old").unwrap().1, 0);
+        assert_eq!(
+            agent.nudge_counters.read().await.get("sess-old").unwrap().1,
+            0
+        );
     }
 
     #[tokio::test]
@@ -3131,7 +3161,11 @@ mod tests {
 
         // Counter should be evicted
         assert!(
-            !agent.nudge_counters.read().await.contains_key("sess-export"),
+            !agent
+                .nudge_counters
+                .read()
+                .await
+                .contains_key("sess-export"),
             "Counter should be evicted after session export"
         );
     }
