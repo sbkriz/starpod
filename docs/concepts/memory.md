@@ -106,9 +106,9 @@ Append to today's daily log:
 }
 ```
 
-## Background Memory Nudge
+## Background Review
 
-Starpod can automatically review conversations and persist important information to memory — without the agent needing to decide inline during the conversation.
+Starpod can automatically review conversations and persist important information to memory (and skills) — without the agent needing to decide inline during the conversation.
 
 Every **N user messages** (configurable via `memory.nudge_interval`, default: 10), a background LLM call:
 
@@ -118,8 +118,18 @@ Every **N user messages** (configurable via `memory.nudge_interval`, default: 10
    - User preferences and personal details → `USER.md`
    - Key decisions, facts, and technical context → `MEMORY.md`
    - Time-specific notes and conversation summaries → daily log
+4. When **self-improve** is enabled, also creates or updates skills via `SkillCreate` / `SkillUpdate` for complex workflows discovered in the conversation
 
 The nudge runs in a background task and never blocks the main chat flow. If the LLM call fails, a warning is logged and the conversation continues unaffected (fail-open).
+
+### Short conversations
+
+Conversations that don't reach the nudge interval (e.g., 3 messages with `nudge_interval = 10`) are handled by two mechanisms:
+
+- **Session switch**: when a user sends a message to a different session, any un-nudged sessions they left behind are automatically flushed in the background. This is the primary safety net for the web UI, where sessions are long-lived and never close.
+- **Session close**: when a gap-based session closes (e.g., Telegram after 6 hours of inactivity), a final nudge runs if there are un-nudged messages.
+
+In both cases, the nudge reviews the full transcript and persists important information, so no conversation is lost.
 
 ### Configuration
 
@@ -127,6 +137,7 @@ The nudge runs in a background task and never blocks the main chat flow. If the 
 |-----|------|---------|-------------|
 | `nudge_interval` | integer | `10` | User messages between nudges. Set to `0` to disable |
 | `nudge_model` | string | — | Model override. Falls back to `compaction.flush_model` → `compaction_model` → primary model |
+| `self_improve` | bool | `false` | Also create/update skills during background reviews (top-level setting) |
 
 ```toml
 [memory]
@@ -138,18 +149,19 @@ nudge_model = "anthropic/claude-haiku-4-5-20251001"
 Use a fast, cheap model (like Haiku) for nudges — they don't need the full power of your primary model.
 :::
 
-### Nudge vs. Pre-Compaction Flush
+### Background Review vs. Pre-Compaction Flush
 
 Starpod has two mechanisms for background memory persistence:
 
-| | Nudge | Flush |
+| | Background Review | Flush |
 |---|---|---|
-| **When** | Every N user messages | Before context compaction |
-| **Trigger** | Message count | Context window filling up |
+| **When** | Every N user messages (+ session switch/close) | Before context compaction |
+| **Trigger** | Message count / session switch | Context window filling up |
 | **Scope** | Full session transcript | Messages being discarded |
+| **Tools** | Memory + Skills (when self-improve on) | Memory only |
 | **Config** | `memory.nudge_interval` | `compaction.memory_flush` |
 
-Both can be active simultaneously. The nudge catches information proactively; the flush is a safety net before context is lost.
+Both can be active simultaneously. The background review catches information proactively; the flush is a safety net before context is lost.
 
 
 ## Manual Editing

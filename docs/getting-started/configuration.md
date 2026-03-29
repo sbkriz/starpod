@@ -198,7 +198,7 @@ The `[memory]` section tunes search and indexing behavior.
 | `chunk_overlap` | integer | `320` | Overlap in characters between chunks (~80 tokens) |
 | `bootstrap_file_cap` | integer | `20000` | Max characters per file included in bootstrap context |
 | `export_sessions` | bool | `true` | Export closed session transcripts to memory for long-term recall |
-| `nudge_interval` | integer | `10` | Background review every N user messages (`0` = disabled). Reviews memory and skills (when `self_improve` is on) |
+| `nudge_interval` | integer | `10` | Background review every N user messages (`0` = disabled). Reviews memory and skills (when `self_improve` is on). Short conversations that don't reach the interval are flushed when the user switches to a different session |
 | `nudge_model` | string | — | Model for background reviews (falls back to flush → compaction → primary model) |
 
 ## Compaction

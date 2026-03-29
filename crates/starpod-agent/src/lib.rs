@@ -2945,4 +2945,194 @@ mod tests {
         // Cache entry should be gone
         assert!(!agent.bootstrap_cache.read().await.contains_key(session_id));
     }
+
+    // ── nudge counter and flush_stale_sessions tests ────────────────
+
+    #[tokio::test]
+    async fn nudge_counter_stores_user_id() {
+        let tmp = TempDir::new().unwrap();
+        let agent = StarpodAgent::new(test_config(&tmp)).await.unwrap();
+
+        // Manually insert a counter entry
+        agent
+            .nudge_counters
+            .write()
+            .await
+            .insert("sess-1".into(), ("alice".into(), 3));
+
+        let counters = agent.nudge_counters.read().await;
+        let (uid, count) = counters.get("sess-1").unwrap();
+        assert_eq!(uid, "alice");
+        assert_eq!(*count, 3);
+    }
+
+    #[tokio::test]
+    async fn flush_stale_sessions_finds_stale_for_same_user() {
+        let tmp = TempDir::new().unwrap();
+        let mut cfg = test_config(&tmp);
+        cfg.memory.nudge_interval = 10;
+        let agent = StarpodAgent::new(cfg).await.unwrap();
+
+        // Populate counters: 2 sessions for alice, 1 for bob
+        {
+            let mut counters = agent.nudge_counters.write().await;
+            counters.insert("sess-a1".into(), ("alice".into(), 3)); // stale (3 < 10)
+            counters.insert("sess-a2".into(), ("alice".into(), 5)); // stale (5 < 10)
+            counters.insert("sess-b1".into(), ("bob".into(), 7)); // different user
+        }
+
+        // Flush for alice, current session is sess-a2
+        let config = agent.snapshot_config();
+        agent
+            .flush_stale_sessions("sess-a2", "alice", &config)
+            .await;
+
+        // sess-a1 should have been reset to 0 (flushed)
+        // sess-a2 is current, should be untouched
+        // sess-b1 belongs to bob, should be untouched
+        let counters = agent.nudge_counters.read().await;
+        assert_eq!(counters.get("sess-a1").unwrap().1, 0, "sess-a1 should be reset after flush");
+        assert_eq!(counters.get("sess-a2").unwrap().1, 5, "current session should be untouched");
+        assert_eq!(counters.get("sess-b1").unwrap().1, 7, "other user's session should be untouched");
+    }
+
+    #[tokio::test]
+    async fn flush_stale_sessions_skips_sessions_at_interval_boundary() {
+        let tmp = TempDir::new().unwrap();
+        let mut cfg = test_config(&tmp);
+        cfg.memory.nudge_interval = 10;
+        let agent = StarpodAgent::new(cfg).await.unwrap();
+
+        {
+            let mut counters = agent.nudge_counters.write().await;
+            counters.insert("sess-1".into(), ("alice".into(), 10)); // already nudged (10 % 10 == 0)
+            counters.insert("sess-2".into(), ("alice".into(), 20)); // already nudged (20 % 10 == 0)
+            counters.insert("sess-3".into(), ("alice".into(), 7)); // stale
+        }
+
+        let config = agent.snapshot_config();
+        agent
+            .flush_stale_sessions("sess-new", "alice", &config)
+            .await;
+
+        let counters = agent.nudge_counters.read().await;
+        assert_eq!(counters.get("sess-1").unwrap().1, 10, "at interval boundary, should not flush");
+        assert_eq!(counters.get("sess-2").unwrap().1, 20, "at interval boundary, should not flush");
+        assert_eq!(counters.get("sess-3").unwrap().1, 0, "stale session should be flushed");
+    }
+
+    #[tokio::test]
+    async fn flush_stale_sessions_skips_zero_count() {
+        let tmp = TempDir::new().unwrap();
+        let mut cfg = test_config(&tmp);
+        cfg.memory.nudge_interval = 10;
+        let agent = StarpodAgent::new(cfg).await.unwrap();
+
+        {
+            let mut counters = agent.nudge_counters.write().await;
+            counters.insert("sess-1".into(), ("alice".into(), 0)); // already flushed
+        }
+
+        let config = agent.snapshot_config();
+        agent
+            .flush_stale_sessions("sess-new", "alice", &config)
+            .await;
+
+        // count 0 should remain 0 (not re-flushed)
+        let counters = agent.nudge_counters.read().await;
+        assert_eq!(counters.get("sess-1").unwrap().1, 0);
+    }
+
+    #[tokio::test]
+    async fn flush_stale_sessions_noop_when_disabled() {
+        let tmp = TempDir::new().unwrap();
+        let mut cfg = test_config(&tmp);
+        cfg.memory.nudge_interval = 0; // disabled
+        let agent = StarpodAgent::new(cfg).await.unwrap();
+
+        {
+            let mut counters = agent.nudge_counters.write().await;
+            counters.insert("sess-1".into(), ("alice".into(), 5));
+        }
+
+        let config = agent.snapshot_config();
+        agent
+            .flush_stale_sessions("sess-new", "alice", &config)
+            .await;
+
+        // Should not touch anything when nudge is disabled
+        let counters = agent.nudge_counters.read().await;
+        assert_eq!(counters.get("sess-1").unwrap().1, 5);
+    }
+
+    #[tokio::test]
+    async fn flush_stale_sessions_noop_when_no_other_sessions() {
+        let tmp = TempDir::new().unwrap();
+        let mut cfg = test_config(&tmp);
+        cfg.memory.nudge_interval = 10;
+        let agent = StarpodAgent::new(cfg).await.unwrap();
+
+        {
+            let mut counters = agent.nudge_counters.write().await;
+            counters.insert("sess-current".into(), ("alice".into(), 3));
+        }
+
+        let config = agent.snapshot_config();
+        agent
+            .flush_stale_sessions("sess-current", "alice", &config)
+            .await;
+
+        // Current session should be untouched
+        let counters = agent.nudge_counters.read().await;
+        assert_eq!(counters.get("sess-current").unwrap().1, 3);
+    }
+
+    #[tokio::test]
+    async fn flush_stale_sessions_prevents_double_flush() {
+        let tmp = TempDir::new().unwrap();
+        let mut cfg = test_config(&tmp);
+        cfg.memory.nudge_interval = 10;
+        let agent = StarpodAgent::new(cfg).await.unwrap();
+
+        {
+            let mut counters = agent.nudge_counters.write().await;
+            counters.insert("sess-old".into(), ("alice".into(), 3));
+        }
+
+        let config = agent.snapshot_config();
+
+        // First flush resets counter to 0
+        agent
+            .flush_stale_sessions("sess-new", "alice", &config)
+            .await;
+        assert_eq!(agent.nudge_counters.read().await.get("sess-old").unwrap().1, 0);
+
+        // Second flush should be a no-op (count is 0, so filter excludes it)
+        agent
+            .flush_stale_sessions("sess-another", "alice", &config)
+            .await;
+        assert_eq!(agent.nudge_counters.read().await.get("sess-old").unwrap().1, 0);
+    }
+
+    #[tokio::test]
+    async fn export_session_evicts_counter_with_user_id() {
+        let tmp = TempDir::new().unwrap();
+        let agent = StarpodAgent::new(test_config(&tmp)).await.unwrap();
+
+        // Insert a counter entry
+        agent
+            .nudge_counters
+            .write()
+            .await
+            .insert("sess-export".into(), ("alice".into(), 5));
+
+        // Export session (will fail to find session in DB, but counter eviction still runs)
+        agent.export_session_to_memory("sess-export").await;
+
+        // Counter should be evicted
+        assert!(
+            !agent.nudge_counters.read().await.contains_key("sess-export"),
+            "Counter should be evicted after session export"
+        );
+    }
 }

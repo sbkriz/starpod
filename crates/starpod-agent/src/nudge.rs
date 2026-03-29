@@ -843,6 +843,90 @@ mod tests {
         );
     }
 
+    // ── flush_stale_sessions decision logic ─────────────────────────
+    //
+    // These tests verify the filter predicate used by
+    // StarpodAgent::flush_stale_sessions without needing the full agent.
+
+    /// Simulates the flush_stale_sessions filter: given a set of sessions
+    /// with (user_id, count), returns which session_ids would be flushed.
+    fn simulate_stale_flush(
+        sessions: &[(&str, &str, u32)], // (session_id, user_id, count)
+        current_session_id: &str,
+        current_user_id: &str,
+        interval: u32,
+    ) -> Vec<String> {
+        sessions
+            .iter()
+            .filter(|(sid, uid, count)| {
+                *sid != current_session_id
+                    && *uid == current_user_id
+                    && *count > 0
+                    && (interval == 0 || *count % interval != 0)
+            })
+            .map(|(sid, _, _)| sid.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn stale_flush_finds_un_nudged_sessions_for_same_user() {
+        let sessions = vec![
+            ("sess-a", "alice", 3),
+            ("sess-b", "alice", 7),
+            ("sess-c", "bob", 5),
+        ];
+        let stale = simulate_stale_flush(&sessions, "sess-b", "alice", 10);
+        assert_eq!(stale, vec!["sess-a"], "Only alice's other un-nudged session");
+    }
+
+    #[test]
+    fn stale_flush_skips_current_session() {
+        let sessions = vec![("sess-a", "alice", 3)];
+        let stale = simulate_stale_flush(&sessions, "sess-a", "alice", 10);
+        assert!(stale.is_empty(), "Current session should never be flushed");
+    }
+
+    #[test]
+    fn stale_flush_skips_other_users() {
+        let sessions = vec![
+            ("sess-a", "bob", 3),
+            ("sess-b", "charlie", 7),
+        ];
+        let stale = simulate_stale_flush(&sessions, "sess-new", "alice", 10);
+        assert!(stale.is_empty(), "Should not flush other users' sessions");
+    }
+
+    #[test]
+    fn stale_flush_skips_at_interval_boundary() {
+        let sessions = vec![
+            ("sess-a", "alice", 10), // 10 % 10 == 0 → already nudged
+            ("sess-b", "alice", 20), // 20 % 10 == 0 → already nudged
+            ("sess-c", "alice", 13), // 13 % 10 != 0 → stale
+        ];
+        let stale = simulate_stale_flush(&sessions, "sess-new", "alice", 10);
+        assert_eq!(stale, vec!["sess-c"], "Only un-nudged session should flush");
+    }
+
+    #[test]
+    fn stale_flush_skips_zero_count() {
+        let sessions = vec![
+            ("sess-a", "alice", 0), // already flushed
+        ];
+        let stale = simulate_stale_flush(&sessions, "sess-new", "alice", 10);
+        assert!(stale.is_empty(), "Zero-count sessions should not be flushed again");
+    }
+
+    #[test]
+    fn stale_flush_multiple_stale_sessions() {
+        let sessions = vec![
+            ("sess-a", "alice", 2),
+            ("sess-b", "alice", 4),
+            ("sess-c", "alice", 8),
+        ];
+        let stale = simulate_stale_flush(&sessions, "sess-new", "alice", 10);
+        assert_eq!(stale, vec!["sess-a", "sess-b", "sess-c"]);
+    }
+
     // ── nudge request construction ──────────────────────────────────
 
     #[tokio::test]
