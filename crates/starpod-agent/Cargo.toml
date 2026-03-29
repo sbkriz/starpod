@@ -29,7 +29,7 @@ tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
 mime_guess = "2"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { workspace = true, features = ["json"] }
 htmd = "0.1"
 lol_html = "2"
 readability = { version = "0.3", default-features = false }

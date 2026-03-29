@@ -42,3 +42,4 @@ starpod-vault = { version = "0.2.1", path = "crates/starpod-vault" }
 starpod-auth = { version = "0.2.1", path = "crates/starpod-auth" }
 starpod-db = { version = "0.2.1", path = "crates/starpod-db" }
 agent-sdk = { version = "0.2.1", path = "crates/agent-sdk", package = "starpod-agent-sdk" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
