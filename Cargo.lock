@@ -4736,7 +4736,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "starpod"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -4768,7 +4768,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-agent"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4798,7 +4798,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-agent-sdk"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4835,7 +4835,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-auth"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "argon2",
  "chrono",
@@ -4853,7 +4853,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-browser"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-tungstenite",
  "futures-util",
@@ -4866,7 +4866,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "dotenvy",
  "iana-time-zone",
@@ -4881,7 +4881,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-cron"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -4899,7 +4899,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-db"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "sqlx",
  "starpod-core",
@@ -4910,7 +4910,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-gateway"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axum",
  "chrono",
@@ -4948,7 +4948,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-hooks"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "glob",
  "pretty_assertions",
@@ -4965,7 +4965,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-instances"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4986,7 +4986,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-memory"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5000,7 +5000,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-session"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "serde",
@@ -5016,7 +5016,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-skills"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "serde",
@@ -5028,7 +5028,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-telegram"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.22.1",
  "reqwest 0.12.28",
@@ -5044,7 +5044,7 @@ dependencies = [
 
 [[package]]
 name = "starpod-vault"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aes-gcm",
  "chrono",
