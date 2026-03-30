@@ -53,7 +53,8 @@ use tracing::warn;
 
 use crate::config::{
     AttachmentsConfig, AuthConfig, BrowserConfig, ChannelsConfig, CompactionConfig, CronConfig,
-    FollowupMode, InternetConfig, MemoryConfig, ProvidersConfig, ReasoningEffort, StarpodConfig,
+    FollowupMode, InternetConfig, MemoryConfig, ProvidersConfig, ProxyConfig, ReasoningEffort,
+    StarpodConfig,
 };
 use crate::error::StarpodError;
 
@@ -478,6 +479,10 @@ pub struct AgentConfig {
     #[serde(default)]
     pub internet: InternetConfig,
 
+    /// Secret proxy settings.
+    #[serde(default)]
+    pub proxy: ProxyConfig,
+
     /// Self-improve mode (beta).
     #[serde(default)]
     pub self_improve: bool,
@@ -522,6 +527,7 @@ impl Default for AgentConfig {
             attachments: AttachmentsConfig::default(),
             auth: AuthConfig::default(),
             internet: InternetConfig::default(),
+            proxy: ProxyConfig::default(),
             self_improve: false,
         }
     }
@@ -551,6 +557,7 @@ impl AgentConfig {
             attachments: self.attachments,
             auth: self.auth,
             internet: self.internet,
+            proxy: self.proxy,
             self_improve: self.self_improve,
             project_root: paths.project_root.clone(),
         }

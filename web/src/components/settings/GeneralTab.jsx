@@ -157,6 +157,15 @@ export default function GeneralTab() {
         </Row>
       </Card>
 
+      <Card title="Secret Proxy (beta)" desc="When enabled, vault secrets are returned as opaque tokens. A local proxy swaps them for real values in outbound HTTP, preventing secrets from leaking into the LLM context.">
+        <Toggle
+          label="Enabled"
+          checked={config.proxy_enabled || false}
+          onChange={v => set('proxy_enabled', v)}
+          helpTip="Requires restart. In production (serve), uses kernel-level network isolation on Linux."
+        />
+      </Card>
+
       <SaveBar onSave={save} saving={saving} status={status} />
     </>
   )

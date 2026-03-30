@@ -65,6 +65,10 @@ const CUSTOM_TOOLS: &[&str] = &[
     "BrowserWaitFor",
     "BrowserClose",
     "Attach",
+    "VaultGet",
+    "VaultList",
+    "VaultSet",
+    "VaultDelete",
 ];
 
 /// The Starpod agent orchestrator.
@@ -136,6 +140,7 @@ impl StarpodAgent {
             attachments: config.attachments.clone(),
             auth: config.auth.clone(),
             internet: config.internet.clone(),
+            proxy: config.proxy.clone(),
             self_improve: config.self_improve,
         };
 
@@ -960,6 +965,7 @@ impl StarpodAgent {
             user_md_limit: config.memory.user_md_limit,
             memory_md_limit: config.memory.memory_md_limit,
             attachments,
+            proxy_enabled: config.proxy.enabled,
         });
 
         Box::new(move |tool_name, input| {
@@ -2339,7 +2345,11 @@ mod tests {
         assert!(names.contains(&"WebSearch"));
         assert!(names.contains(&"WebFetch"));
         assert!(names.contains(&"Attach"));
-        assert_eq!(defs.len(), 31);
+        assert!(names.contains(&"VaultGet"));
+        assert!(names.contains(&"VaultList"));
+        assert!(names.contains(&"VaultSet"));
+        assert!(names.contains(&"VaultDelete"));
+        assert_eq!(defs.len(), 35);
     }
 
     #[tokio::test]
@@ -2367,6 +2377,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         };
 
         // Test MemorySearch

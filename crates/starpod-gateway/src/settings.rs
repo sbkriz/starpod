@@ -109,6 +109,8 @@ struct GeneralSettings {
     server_addr: String,
     #[serde(default)]
     self_improve: bool,
+    #[serde(default)]
+    proxy_enabled: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -458,6 +460,10 @@ pub fn settings_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
             "/api/settings/vault/{key}",
             axum::routing::put(put_vault).delete(delete_vault),
         )
+        .route(
+            "/api/settings/vault/{key}/meta",
+            axum::routing::put(put_vault_meta),
+        )
         // Internet
         .route(
             "/api/settings/internet",
@@ -506,6 +512,7 @@ async fn get_general(State(state): State<Arc<AppState>>) -> ApiResult<GeneralSet
         followup_mode: cfg.followup_mode,
         server_addr: cfg.server_addr.clone(),
         self_improve: cfg.self_improve,
+        proxy_enabled: cfg.proxy.enabled,
     }))
 }
 
@@ -583,6 +590,17 @@ async fn put_general(
         "self_improve".into(),
         toml::Value::Boolean(settings.self_improve),
     );
+
+    // Write proxy.enabled into [proxy] table
+    let proxy_table = table
+        .entry("proxy")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    if let Some(pt) = proxy_table.as_table_mut() {
+        pt.insert(
+            "enabled".into(),
+            toml::Value::Boolean(settings.proxy_enabled),
+        );
+    }
 
     write_agent_toml(&state, &doc)?;
     Ok(ok_json())
@@ -2039,16 +2057,27 @@ struct VaultEntry {
     key: String,
     has_value: bool,
     is_system: bool,
+    is_secret: bool,
+    allowed_hosts: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
 struct VaultListResponse {
     entries: Vec<VaultEntry>,
+    proxy_enabled: bool,
 }
 
 #[derive(Deserialize)]
 struct VaultPutBody {
     value: String,
+    #[serde(default = "default_true")]
+    is_secret: bool,
+    #[serde(default)]
+    allowed_hosts: Option<Vec<String>>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 async fn get_vault(State(state): State<Arc<AppState>>) -> ApiResult<VaultListResponse> {
@@ -2056,22 +2085,28 @@ async fn get_vault(State(state): State<Arc<AppState>>) -> ApiResult<VaultListRes
         .vault
         .as_ref()
         .ok_or_else(|| internal("vault not available"))?;
-    let keys = vault
-        .list_keys()
+    let vault_entries = vault
+        .list_entries()
         .await
         .map_err(|e| internal(format!("vault list: {e}")))?;
-    let entries = keys
+    let entries = vault_entries
         .into_iter()
-        .map(|key| {
-            let is_system = starpod_vault::is_system_key(&key);
+        .map(|e| {
+            let is_system = starpod_vault::is_system_key(&e.key);
             VaultEntry {
-                key,
+                key: e.key,
                 has_value: true,
                 is_system,
+                is_secret: e.is_secret,
+                allowed_hosts: e.allowed_hosts,
             }
         })
         .collect();
-    Ok(Json(VaultListResponse { entries }))
+    let proxy_enabled = state.config.read().unwrap().proxy.enabled;
+    Ok(Json(VaultListResponse {
+        entries,
+        proxy_enabled,
+    }))
 }
 
 async fn put_vault(
@@ -2089,8 +2124,14 @@ async fn put_vault(
         .vault
         .as_ref()
         .ok_or_else(|| internal("vault not available"))?;
+
+    // Auto-suggest hosts for known keys when none are provided
+    let hosts = body
+        .allowed_hosts
+        .or_else(|| starpod_vault::known_hosts::default_hosts_for_key(&key));
+
     vault
-        .set(&key, &body.value, None)
+        .set_with_meta(&key, &body.value, body.is_secret, hosts.as_deref(), None)
         .await
         .map_err(|e| internal(format!("vault set {key}: {e}")))?;
     // Keep process env in sync for system keys
@@ -2115,6 +2156,35 @@ async fn delete_vault(
     // Keep process env in sync for system keys
     if starpod_vault::is_system_key(&key) {
         std::env::remove_var(&key);
+    }
+    Ok(StatusCode::OK)
+}
+
+// Metadata-only update (is_secret + allowed_hosts) without re-entering the value.
+
+#[derive(Deserialize)]
+struct VaultMetaBody {
+    #[serde(default = "default_true")]
+    is_secret: bool,
+    #[serde(default)]
+    allowed_hosts: Option<Vec<String>>,
+}
+
+async fn put_vault_meta(
+    State(state): State<Arc<AppState>>,
+    Path(key): Path<String>,
+    Json(body): Json<VaultMetaBody>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    let vault = state
+        .vault
+        .as_ref()
+        .ok_or_else(|| internal("vault not available"))?;
+    let updated = vault
+        .update_meta(&key, body.is_secret, body.allowed_hosts.as_deref())
+        .await
+        .map_err(|e| internal(format!("vault update_meta {key}: {e}")))?;
+    if !updated {
+        return Err(bad_request(format!("vault key '{}' not found", key)));
     }
     Ok(StatusCode::OK)
 }
@@ -2456,6 +2526,7 @@ mod tests {
             followup_mode: FollowupMode::Inject,
             server_addr: "127.0.0.1:3000".into(),
             self_improve: false,
+            proxy_enabled: false,
         };
         let json = serde_json::to_string(&settings).unwrap();
         let back: GeneralSettings = serde_json::from_str(&json).unwrap();
@@ -4211,5 +4282,470 @@ mod tests {
 
         let stored = vault.get("TELEGRAM_BOT_TOKEN", None).await.unwrap();
         assert!(stored.is_none(), "empty token should delete from vault");
+    }
+
+    // ── Vault metadata tests ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn vault_list_returns_metadata() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+        let vault = state.vault.as_ref().unwrap();
+        vault
+            .set_with_meta(
+                "MY_KEY",
+                "secret",
+                true,
+                Some(&["api.example.com".into()]),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let (status, json) = get_json(Arc::clone(&state), "/api/settings/vault").await;
+        assert_eq!(status, StatusCode::OK);
+
+        let entry = &json["entries"][0];
+        assert_eq!(entry["key"], "MY_KEY");
+        assert_eq!(entry["is_secret"], true);
+        assert_eq!(entry["allowed_hosts"][0], "api.example.com");
+        assert!(json.get("proxy_enabled").is_some());
+    }
+
+    #[tokio::test]
+    async fn vault_put_with_metadata() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/MY_TOKEN",
+            serde_json::json!({
+                "value": "tok_abc",
+                "is_secret": true,
+                "allowed_hosts": ["api.stripe.com"]
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let vault = state.vault.as_ref().unwrap();
+        let entry = vault.get_entry("MY_TOKEN").await.unwrap().unwrap();
+        assert!(entry.is_secret);
+        assert_eq!(
+            entry.allowed_hosts,
+            Some(vec!["api.stripe.com".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn vault_put_non_secret() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/SENTRY_DSN",
+            serde_json::json!({
+                "value": "https://sentry.io/123",
+                "is_secret": false
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let vault = state.vault.as_ref().unwrap();
+        let entry = vault.get_entry("SENTRY_DSN").await.unwrap().unwrap();
+        assert!(!entry.is_secret);
+        assert!(entry.allowed_hosts.is_none());
+    }
+
+    #[tokio::test]
+    async fn vault_put_auto_suggests_hosts_for_known_keys() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+
+        // Store OPENAI_API_KEY without specifying hosts
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/OPENAI_API_KEY",
+            serde_json::json!({ "value": "sk-test" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Should have auto-suggested hosts
+        let vault = state.vault.as_ref().unwrap();
+        let entry = vault.get_entry("OPENAI_API_KEY").await.unwrap().unwrap();
+        assert_eq!(
+            entry.allowed_hosts,
+            Some(vec!["api.openai.com".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn vault_put_explicit_hosts_override_defaults() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+
+        // Explicitly provide hosts for a known key
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/OPENAI_API_KEY",
+            serde_json::json!({
+                "value": "sk-test",
+                "allowed_hosts": ["custom-proxy.internal"]
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let vault = state.vault.as_ref().unwrap();
+        let entry = vault.get_entry("OPENAI_API_KEY").await.unwrap().unwrap();
+        assert_eq!(
+            entry.allowed_hosts,
+            Some(vec!["custom-proxy.internal".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn vault_meta_update() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+        let vault = state.vault.as_ref().unwrap();
+        vault.set("MY_KEY", "val", None).await.unwrap();
+
+        // Update metadata via the /meta endpoint
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/MY_KEY/meta",
+            serde_json::json!({
+                "is_secret": false,
+                "allowed_hosts": null
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let entry = vault.get_entry("MY_KEY").await.unwrap().unwrap();
+        assert!(!entry.is_secret);
+        assert!(entry.allowed_hosts.is_none());
+    }
+
+    #[tokio::test]
+    async fn vault_meta_update_sets_hosts() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+        let vault = state.vault.as_ref().unwrap();
+        vault.set("MY_KEY", "val", None).await.unwrap();
+
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/MY_KEY/meta",
+            serde_json::json!({
+                "is_secret": true,
+                "allowed_hosts": ["api.github.com", "*.github.com"]
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let entry = vault.get_entry("MY_KEY").await.unwrap().unwrap();
+        assert!(entry.is_secret);
+        assert_eq!(
+            entry.allowed_hosts,
+            Some(vec![
+                "api.github.com".to_string(),
+                "*.github.com".to_string()
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn vault_meta_update_nonexistent_key() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+
+        let (status, _) = put_json(
+            state,
+            "/api/settings/vault/NOPE/meta",
+            serde_json::json!({ "is_secret": false }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn general_proxy_enabled_roundtrip() {
+        let (_tmp, state) = test_app_state().await;
+
+        // Initially false
+        let (_, json) = get_json(Arc::clone(&state), "/api/settings/general").await;
+        assert_eq!(json["proxy_enabled"], false);
+
+        // Set to true
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/general",
+            serde_json::json!({
+                "models": ["anthropic/test-model"],
+                "max_turns": 200,
+                "max_tokens": 16384,
+                "agent_name": "TestBot",
+                "server_addr": "127.0.0.1:3000",
+                "proxy_enabled": true
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Verify persisted
+        let (_, json) = get_json(Arc::clone(&state), "/api/settings/general").await;
+        assert_eq!(json["proxy_enabled"], true);
+
+        // Verify in agent.toml
+        let content = std::fs::read_to_string(&state.paths.agent_toml).unwrap();
+        assert!(content.contains("[proxy]"));
+        assert!(content.contains("enabled = true"));
+    }
+
+    // ── Vault endpoint stress tests ──────────────────────────────
+
+    #[tokio::test]
+    async fn vault_put_special_chars_in_key() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+
+        // Underscore-heavy key (valid)
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/A_B_C_123",
+            serde_json::json!({ "value": "v" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let vault = state.vault.as_ref().unwrap();
+        assert!(vault.get("A_B_C_123", None).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn vault_put_url_encoded_key() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+
+        // Key with special chars that need URL encoding
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/MY%20KEY",
+            serde_json::json!({ "value": "v" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let vault = state.vault.as_ref().unwrap();
+        assert!(vault.get("MY KEY", None).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn vault_put_preserves_metadata_on_value_update() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+
+        // First set with metadata
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/TOKEN",
+            serde_json::json!({
+                "value": "v1",
+                "is_secret": true,
+                "allowed_hosts": ["api.x.com"]
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Update value with same metadata
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/TOKEN",
+            serde_json::json!({
+                "value": "v2",
+                "is_secret": true,
+                "allowed_hosts": ["api.x.com"]
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let vault = state.vault.as_ref().unwrap();
+        let entry = vault.get_entry("TOKEN").await.unwrap().unwrap();
+        assert!(entry.is_secret);
+        assert_eq!(entry.allowed_hosts, Some(vec!["api.x.com".to_string()]));
+        assert_eq!(vault.get("TOKEN", None).await.unwrap().as_deref(), Some("v2"));
+    }
+
+    #[tokio::test]
+    async fn vault_put_default_is_secret_true_when_omitted() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+
+        // Omit is_secret — should default to true
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/KEY",
+            serde_json::json!({ "value": "val" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let vault = state.vault.as_ref().unwrap();
+        let entry = vault.get_entry("KEY").await.unwrap().unwrap();
+        assert!(entry.is_secret);
+    }
+
+    #[tokio::test]
+    async fn vault_put_empty_hosts_array() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/KEY",
+            serde_json::json!({
+                "value": "val",
+                "allowed_hosts": []
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let vault = state.vault.as_ref().unwrap();
+        let entry = vault.get_entry("KEY").await.unwrap().unwrap();
+        // Empty array should be stored (not auto-suggested)
+        assert_eq!(entry.allowed_hosts, Some(vec![]));
+    }
+
+    #[tokio::test]
+    async fn vault_meta_idempotent() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+        let vault = state.vault.as_ref().unwrap();
+        vault.set("KEY", "val", None).await.unwrap();
+
+        // Same meta update twice — should be idempotent
+        for _ in 0..3 {
+            let (status, _) = put_json(
+                Arc::clone(&state),
+                "/api/settings/vault/KEY/meta",
+                serde_json::json!({
+                    "is_secret": false,
+                    "allowed_hosts": ["h.com"]
+                }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+
+        let entry = vault.get_entry("KEY").await.unwrap().unwrap();
+        assert!(!entry.is_secret);
+        assert_eq!(entry.allowed_hosts, Some(vec!["h.com".to_string()]));
+    }
+
+    #[tokio::test]
+    async fn vault_meta_preserves_value() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+        let vault = state.vault.as_ref().unwrap();
+        vault.set("KEY", "my-secret-value", None).await.unwrap();
+
+        // Update metadata
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/KEY/meta",
+            serde_json::json!({ "is_secret": false }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Value must be unchanged
+        assert_eq!(
+            vault.get("KEY", None).await.unwrap().as_deref(),
+            Some("my-secret-value")
+        );
+    }
+
+    #[tokio::test]
+    async fn vault_known_key_hosts_not_overwritten_by_explicit_null() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+
+        // GITHUB_TOKEN with allowed_hosts: null should get auto-suggested hosts
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/GITHUB_TOKEN",
+            serde_json::json!({
+                "value": "ghp_test",
+                "allowed_hosts": null
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let vault = state.vault.as_ref().unwrap();
+        let entry = vault.get_entry("GITHUB_TOKEN").await.unwrap().unwrap();
+        // Should have auto-suggested hosts since null triggers the fallback
+        assert_eq!(
+            entry.allowed_hosts,
+            Some(vec!["api.github.com".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn vault_list_with_mixed_entries() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+        let vault = state.vault.as_ref().unwrap();
+
+        // Mix of secrets and non-secrets
+        vault
+            .set_with_meta("SECRET_A", "v", true, Some(&["a.com".into()]), None)
+            .await
+            .unwrap();
+        vault
+            .set_with_meta("CONFIG_B", "v", false, None, None)
+            .await
+            .unwrap();
+        vault.set("PLAIN_C", "v", None).await.unwrap(); // default is_secret=true
+
+        let (status, json) = get_json(Arc::clone(&state), "/api/settings/vault").await;
+        assert_eq!(status, StatusCode::OK);
+
+        let entries = json["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 3);
+
+        // Sorted alphabetically
+        assert_eq!(entries[0]["key"], "CONFIG_B");
+        assert_eq!(entries[0]["is_secret"], false);
+        assert!(entries[0]["allowed_hosts"].is_null());
+
+        assert_eq!(entries[1]["key"], "PLAIN_C");
+        assert_eq!(entries[1]["is_secret"], true);
+
+        assert_eq!(entries[2]["key"], "SECRET_A");
+        assert_eq!(entries[2]["is_secret"], true);
+        assert_eq!(entries[2]["allowed_hosts"][0], "a.com");
+    }
+
+    #[tokio::test]
+    async fn vault_delete_then_recreate_with_different_meta() {
+        let (_tmp, state) = test_app_state_with_vault().await;
+        let vault = state.vault.as_ref().unwrap();
+
+        // Create as secret
+        vault
+            .set_with_meta("KEY", "v1", true, Some(&["h.com".into()]), None)
+            .await
+            .unwrap();
+
+        // Delete
+        let status = delete_json(Arc::clone(&state), "/api/settings/vault/KEY").await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Recreate as non-secret
+        let (status, _) = put_json(
+            Arc::clone(&state),
+            "/api/settings/vault/KEY",
+            serde_json::json!({ "value": "v2", "is_secret": false }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let entry = vault.get_entry("KEY").await.unwrap().unwrap();
+        assert!(!entry.is_secret);
+        assert!(entry.allowed_hosts.is_none());
     }
 }

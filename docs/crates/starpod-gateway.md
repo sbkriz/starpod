@@ -45,6 +45,7 @@ let router = starpod_gateway::build_router(state);
 | `GET/POST` | `/api/settings/auth/users` | Auth user CRUD |
 | `GET/PUT` | `/api/settings/auth/users/:id` | Auth user detail |
 | `GET/PUT/DELETE` | `/api/settings/auth/users/:id/telegram` | Per-user Telegram linking |
+| `PUT` | `/api/settings/vault/{key}/meta` | Update vault entry metadata (is_secret, allowed_hosts) |
 | `GET/POST` | `/api/settings/auth/users/:id/api-keys` | User API key management |
 | `GET` | `/ws` | WebSocket streaming |
 | `GET` | `/docs`, `/docs/*` | Embedded documentation site |

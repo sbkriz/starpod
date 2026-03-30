@@ -17,22 +17,90 @@ Secrets enter the vault through two paths:
 
 At startup (`starpod dev`, `starpod serve`, `starpod repl`, `starpod chat`), all vault secrets are decrypted and injected into the process environment via `std::env::set_var()`. The agent accesses them two ways:
 - **`EnvGet` tool** — reads `std::env::var()`, blocks system keys, audit-logs each read
+- **`VaultGet` tool** — retrieves secrets directly from the vault (returns opaque tokens when proxy is enabled)
 - **Bash/SSH commands** — child processes inherit the process environment automatically
 
 The system prompt dynamically lists which non-system env vars are available, so the agent knows what credentials it can use.
+
+## Secret Classification
+
+Each vault entry has two metadata fields:
+
+- **`is_secret`** (default: `true`) — Whether the value should be opaque-ified when the secret proxy is enabled. Set to `false` for non-sensitive config like `SENTRY_DSN`.
+- **`allowed_hosts`** — Hostnames where the secret may be sent (e.g. `["api.openai.com"]`). `null` means unrestricted. Well-known keys (see below) get auto-suggested hosts.
+
+### Default Hosts for Known Keys
+
+When storing a well-known key without specifying hosts, the vault auto-suggests appropriate host bindings:
+
+| Key | Default Hosts |
+|-----|---------------|
+| `ANTHROPIC_API_KEY` | `api.anthropic.com` |
+| `OPENAI_API_KEY` | `api.openai.com` |
+| `GEMINI_API_KEY` | `generativelanguage.googleapis.com` |
+| `GROQ_API_KEY` | `api.groq.com` |
+| `DEEPSEEK_API_KEY` | `api.deepseek.com` |
+| `OPENROUTER_API_KEY` | `openrouter.ai` |
+| `BRAVE_API_KEY` | `api.search.brave.com` |
+| `TELEGRAM_BOT_TOKEN` | `api.telegram.org` |
+| `GITHUB_TOKEN` / `GH_TOKEN` | `api.github.com` |
+
+## Secret Proxy (beta)
+
+When `proxy.enabled = true` in `agent.toml`, the vault changes how secrets are surfaced to the agent:
+
+- **Secrets** (`is_secret = true`) are returned as **opaque tokens** (`starpod:v1:<base64(encrypted)>`) instead of plaintext. The encrypted token contains both the real value and the allowed hosts.
+- **Config values** (`is_secret = false`) remain plaintext.
+- The `VaultGet` tool returns opaque tokens when the proxy is active, plaintext otherwise.
+- `inject_vault_env()` at startup produces opaque tokens for secret entries.
+
+The proxy crate (Phase 2+) intercepts outbound HTTP traffic, finds `starpod:v1:` tokens, decrypts them, verifies the target host matches `allowed_hosts`, and replaces the token with the real value. This prevents API keys from leaking into the LLM context window.
+
+### Tiered Isolation
+
+The runtime automatically selects the strongest isolation available:
+
+| Tier | Condition | Mechanism |
+|------|-----------|-----------|
+| **Tier 1** | `starpod serve` + Linux + `CAP_NET_ADMIN` | Network namespace — kernel-enforced, no bypass possible |
+| **Tier 0** | All other contexts | Proxy env vars (`HTTP_PROXY`, `HTTPS_PROXY`, `SSL_CERT_FILE`) |
+| **Disabled** | `proxy.enabled = false` (default) | Plaintext injection, current behavior |
+
+### Configuration
+
+```toml
+# agent.toml
+[proxy]
+enabled = true  # default: false
+```
+
+The proxy toggle is also available in the web UI under **Settings > General > Secret Proxy (beta)**.
+
+## Agent Vault Tools
+
+The agent has four vault tools:
+
+| Tool | Description | Confirmation |
+|------|-------------|--------------|
+| `VaultGet` | Retrieve a secret (opaque token when proxy active) | No |
+| `VaultList` | List all non-system entries with metadata | No |
+| `VaultSet` | Store a secret with metadata | **Yes** |
+| `VaultDelete` | Delete a secret | **Yes** |
+
+`VaultSet` and `VaultDelete` require user confirmation via the permission system. System keys are blocked from all vault tools.
 
 ## System Keys
 
 System-managed secrets (LLM provider keys, service tokens, platform secrets) are protected at two layers:
 
-- **`EnvGet` tool** — `is_system_key()` blocks reads and returns an error
+- **`EnvGet` / `VaultGet` tools** — `is_system_key()` blocks reads and returns an error
 - **Bash tool** — system keys are stripped from child process environments via `env_remove()`, preventing `echo $ANTHROPIC_API_KEY` or `env | grep API` from leaking them
 
 See the [starpod-vault crate docs](/crates/starpod-vault) for the full list of system keys.
 
 ## Programmatic Use
 
-The vault is available as a Rust library (`starpod_vault::Vault`). System keys (API keys, bot tokens) are stored in the vault and managed via the Settings UI or `starpod init --env`. The agent accesses secrets via the `EnvGet` tool.
+The vault is available as a Rust library (`starpod_vault::Vault`). System keys (API keys, bot tokens) are stored in the vault and managed via the Settings UI or `starpod init --env`. The agent accesses secrets via the `VaultGet` or `EnvGet` tools.
 
 ## Use Cases
 

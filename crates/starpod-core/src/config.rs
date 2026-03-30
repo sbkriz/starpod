@@ -244,6 +244,31 @@ impl Default for InternetConfig {
     }
 }
 
+/// Secret proxy configuration (`[proxy]` in `agent.toml`).
+///
+/// When enabled, vault secrets marked `is_secret = true` are returned as opaque
+/// tokens instead of plaintext. The proxy crate (Phase 2+) intercepts outbound
+/// HTTP and swaps tokens for real values.
+///
+/// # Example
+///
+/// ```toml
+/// [proxy]
+/// enabled = true
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProxyConfig {
+    /// Whether the secret proxy is enabled (default: `false`).
+    pub enabled: bool,
+}
+
+impl Default for ProxyConfig {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
+}
+
 /// Channel configuration namespace (`[channels.*]`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -650,6 +675,10 @@ pub struct StarpodConfig {
     #[serde(default)]
     pub internet: InternetConfig,
 
+    /// Secret proxy settings.
+    #[serde(default)]
+    pub proxy: ProxyConfig,
+
     /// Self-improve mode (beta): when enabled, the agent proactively creates
     /// skills from complex tasks and updates outdated skills during use.
     #[serde(default)]
@@ -745,6 +774,7 @@ impl Default for StarpodConfig {
             attachments: AttachmentsConfig::default(),
             auth: AuthConfig::default(),
             internet: InternetConfig::default(),
+            proxy: ProxyConfig::default(),
             self_improve: false,
             project_root: PathBuf::new(),
         }

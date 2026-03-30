@@ -69,6 +69,8 @@ pub struct ToolContext {
     /// Populated by the `Attach` tool; read by the channel layer after
     /// the stream completes.
     pub attachments: Arc<tokio::sync::Mutex<Vec<Attachment>>>,
+    /// Whether the secret proxy is enabled (controls opaque token generation).
+    pub proxy_enabled: bool,
 }
 
 /// Build the JSON schema definitions for all Starpod custom tools.
@@ -697,6 +699,70 @@ pub fn custom_tool_definitions() -> Vec<CustomToolDefinition> {
                 "required": ["path"]
             }),
         },
+        // ── Vault tools ──────────────────────────────────────────────
+        CustomToolDefinition {
+            name: "VaultGet".into(),
+            description: "Retrieve a secret from the vault by key. When the secret proxy is enabled, secrets are returned as opaque tokens (starpod:v1:...) that the proxy will swap for real values in outbound HTTP requests. Use this instead of EnvGet for vault-managed secrets.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The vault key to retrieve"
+                    }
+                },
+                "required": ["key"]
+            }),
+        },
+        CustomToolDefinition {
+            name: "VaultList".into(),
+            description: "List all keys in the vault with metadata (is_secret, allowed_hosts). Does not return decrypted values.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {}
+            }),
+        },
+        CustomToolDefinition {
+            name: "VaultSet".into(),
+            description: "Store a secret in the vault. Requires user confirmation. Use for API keys, tokens, and other credentials. Known keys (e.g. OPENAI_API_KEY) get automatic host binding suggestions.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The vault key name"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "The secret value to store"
+                    },
+                    "is_secret": {
+                        "type": "boolean",
+                        "description": "Whether this value should be opaque-ified when proxy is enabled (default: true)"
+                    },
+                    "allowed_hosts": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Hostnames where this secret may be sent (e.g. [\"api.openai.com\"]). Auto-suggested for known keys."
+                    }
+                },
+                "required": ["key", "value"]
+            }),
+        },
+        CustomToolDefinition {
+            name: "VaultDelete".into(),
+            description: "Delete a secret from the vault. Requires user confirmation.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The vault key to delete"
+                    }
+                },
+                "required": ["key"]
+            }),
+        },
     ]
 }
 
@@ -1092,6 +1158,195 @@ pub async fn handle_custom_tool(
                 Err(_) => Some(ToolResult {
                     content: format!("Environment variable '{}' is not set.", key),
                     is_error: false,
+                    raw_content: None,
+                }),
+            }
+        }
+
+        // --- Vault tools ---
+        "VaultGet" => {
+            let key = input.get("key")?.as_str()?;
+            let vault = ctx.vault.as_ref()?;
+
+            debug!(key = %key, "VaultGet");
+
+            if starpod_vault::is_system_key(key) {
+                return Some(ToolResult {
+                    content: format!("Access to vault key '{}' is restricted.", key),
+                    is_error: true,
+                    raw_content: None,
+                });
+            }
+
+            match vault.get(key, ctx.user_id.as_deref()).await {
+                Ok(Some(value)) => {
+                    #[cfg(feature = "secret-proxy")]
+                    {
+                        if ctx.proxy_enabled {
+                            let entry = vault.get_entry(key).await.ok().flatten();
+                            let is_secret =
+                                entry.as_ref().map(|e| e.is_secret).unwrap_or(true);
+
+                            if is_secret {
+                                let hosts = entry
+                                    .as_ref()
+                                    .and_then(|e| e.allowed_hosts.clone())
+                                    .unwrap_or_default();
+                                match starpod_vault::opaque::encode_opaque_token(
+                                    vault.cipher(),
+                                    &value,
+                                    &hosts,
+                                ) {
+                                    Ok(token) => {
+                                        return Some(ToolResult {
+                                            content: token,
+                                            is_error: false,
+                                            raw_content: None,
+                                        })
+                                    }
+                                    Err(e) => {
+                                        return Some(ToolResult {
+                                            content: format!(
+                                                "Failed to create opaque token: {e}"
+                                            ),
+                                            is_error: true,
+                                            raw_content: None,
+                                        })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Some(ToolResult {
+                        content: value,
+                        is_error: false,
+                        raw_content: None,
+                    })
+                }
+                Ok(None) => Some(ToolResult {
+                    content: format!("Vault key '{}' not found.", key),
+                    is_error: false,
+                    raw_content: None,
+                }),
+                Err(e) => Some(ToolResult {
+                    content: format!("Vault error: {e}"),
+                    is_error: true,
+                    raw_content: None,
+                }),
+            }
+        }
+
+        "VaultList" => {
+            let vault = ctx.vault.as_ref()?;
+
+            debug!("VaultList");
+
+            match vault.list_entries().await {
+                Ok(entries) => {
+                    let list: Vec<serde_json::Value> = entries
+                        .iter()
+                        .filter(|e| !starpod_vault::is_system_key(&e.key))
+                        .map(|e| {
+                            serde_json::json!({
+                                "key": e.key,
+                                "is_secret": e.is_secret,
+                                "allowed_hosts": e.allowed_hosts,
+                                "updated_at": e.updated_at,
+                            })
+                        })
+                        .collect();
+                    Some(ToolResult {
+                        content: serde_json::to_string_pretty(&list).unwrap_or_default(),
+                        is_error: false,
+                        raw_content: None,
+                    })
+                }
+                Err(e) => Some(ToolResult {
+                    content: format!("Vault error: {e}"),
+                    is_error: true,
+                    raw_content: None,
+                }),
+            }
+        }
+
+        "VaultSet" => {
+            let key = input.get("key")?.as_str()?;
+            let value = input.get("value")?.as_str()?;
+            let is_secret = input
+                .get("is_secret")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let allowed_hosts: Option<Vec<String>> = input
+                .get("allowed_hosts")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
+            let vault = ctx.vault.as_ref()?;
+
+            debug!(key = %key, is_secret = %is_secret, "VaultSet");
+
+            if starpod_vault::is_system_key(key) {
+                return Some(ToolResult {
+                    content: format!("Cannot modify system key '{}'.", key),
+                    is_error: true,
+                    raw_content: None,
+                });
+            }
+
+            // Auto-suggest hosts if not provided and key is well-known
+            let hosts =
+                allowed_hosts.or_else(|| starpod_vault::known_hosts::default_hosts_for_key(key));
+
+            match vault
+                .set_with_meta(
+                    key,
+                    value,
+                    is_secret,
+                    hosts.as_deref(),
+                    ctx.user_id.as_deref(),
+                )
+                .await
+            {
+                Ok(()) => {
+                    let mut msg = format!("Vault key '{}' stored successfully.", key);
+                    if let Some(ref h) = hosts {
+                        msg.push_str(&format!(" Allowed hosts: {:?}", h));
+                    }
+                    Some(ToolResult {
+                        content: msg,
+                        is_error: false,
+                        raw_content: None,
+                    })
+                }
+                Err(e) => Some(ToolResult {
+                    content: format!("Vault error: {e}"),
+                    is_error: true,
+                    raw_content: None,
+                }),
+            }
+        }
+
+        "VaultDelete" => {
+            let key = input.get("key")?.as_str()?;
+            let vault = ctx.vault.as_ref()?;
+
+            debug!(key = %key, "VaultDelete");
+
+            if starpod_vault::is_system_key(key) {
+                return Some(ToolResult {
+                    content: format!("Cannot delete system key '{}'.", key),
+                    is_error: true,
+                    raw_content: None,
+                });
+            }
+
+            match vault.delete(key, ctx.user_id.as_deref()).await {
+                Ok(()) => Some(ToolResult {
+                    content: format!("Vault key '{}' deleted.", key),
+                    is_error: false,
+                    raw_content: None,
+                }),
+                Err(e) => Some(ToolResult {
+                    content: format!("Vault error: {e}"),
+                    is_error: true,
                     raw_content: None,
                 }),
             }
@@ -2690,6 +2945,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         };
 
         std::env::set_var("STARPOD_ENVGET_TEST_VAR", "test_value_42");
@@ -2741,6 +2997,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         };
 
         let result = handle_custom_tool(
@@ -2790,6 +3047,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         };
 
         // System keys should be blocked
@@ -2861,6 +3119,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         };
 
         // Set an env var and read it via EnvGet — exercises the vault audit path
@@ -2919,6 +3178,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         };
 
         // System key should be blocked before reaching the audit code
@@ -2973,6 +3233,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         };
 
         // Write a file
@@ -3036,6 +3297,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         };
 
         let result = handle_custom_tool(&ctx, "FileList", &serde_json::json!({}))
@@ -3088,6 +3350,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         };
 
         let result = handle_custom_tool(
@@ -3141,6 +3404,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         };
 
         let result = handle_custom_tool(
@@ -3191,6 +3455,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         };
 
         let result = handle_custom_tool(
@@ -3243,6 +3508,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         }
     }
 
@@ -3669,6 +3935,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         }
     }
 
@@ -3847,6 +4114,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         }
     }
 
@@ -4240,6 +4508,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         }
     }
 
@@ -4428,6 +4697,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         }
     }
 
@@ -4699,6 +4969,7 @@ mod tests {
             user_md_limit: 4_000,
             memory_md_limit: 8_000,
             attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
         }
     }
 
@@ -4897,6 +5168,340 @@ mod tests {
             result.content.contains("2.0 KB"),
             "Expected size in KB, got: {}",
             result.content
+        );
+    }
+
+    // ── Vault tool stress tests ──────────────────────────────────
+
+    async fn vault_ctx(tmp: &TempDir) -> (ToolContext, Arc<starpod_vault::Vault>) {
+        let memory = Arc::new(
+            starpod_memory::MemoryStore::new(
+                &tmp.path().join("agent"),
+                &tmp.path().join("agent").join("config"),
+                &tmp.path().join("db"),
+            )
+            .await
+            .unwrap(),
+        );
+        let skills =
+            Arc::new(starpod_skills::SkillStore::new(&tmp.path().join("skills")).unwrap());
+        let core_db = starpod_db::CoreDb::new(tmp.path()).await.unwrap();
+        let cron = Arc::new(starpod_cron::CronStore::from_pool(core_db.pool().clone()));
+
+        let master_key = [0xAB_u8; 32];
+        let vault = Arc::new(
+            starpod_vault::Vault::new(&tmp.path().join("db").join("vault.db"), &master_key)
+                .await
+                .unwrap(),
+        );
+
+        let ctx = ToolContext {
+            memory,
+            user_view: None,
+            skills,
+            cron,
+            browser: Arc::new(tokio::sync::Mutex::new(None)),
+            browser_enabled: false,
+            browser_cdp_url: None,
+            user_tz: None,
+            home_dir: tmp.path().join("home"),
+            agent_home: tmp.path().join(".starpod"),
+            user_id: Some("testuser".into()),
+            http_client: Client::new(),
+            internet: InternetConfig::default(),
+            brave_api_key: None,
+            vault: Some(Arc::clone(&vault)),
+            user_md_limit: 4_000,
+            memory_md_limit: 8_000,
+            attachments: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            proxy_enabled: false,
+        };
+
+        (ctx, vault)
+    }
+
+    #[tokio::test]
+    async fn vault_get_returns_plaintext_when_proxy_disabled() {
+        let tmp = TempDir::new().unwrap();
+        let (ctx, vault) = vault_ctx(&tmp).await;
+        vault.set("MY_KEY", "my-secret", None).await.unwrap();
+
+        let result =
+            handle_custom_tool(&ctx, "VaultGet", &serde_json::json!({"key": "MY_KEY"}))
+                .await
+                .unwrap();
+        assert!(!result.is_error);
+        assert_eq!(result.content, "my-secret");
+    }
+
+    #[tokio::test]
+    async fn vault_get_blocks_system_keys() {
+        let tmp = TempDir::new().unwrap();
+        let (ctx, vault) = vault_ctx(&tmp).await;
+        vault
+            .set("ANTHROPIC_API_KEY", "sk-ant-xxx", None)
+            .await
+            .unwrap();
+
+        let result = handle_custom_tool(
+            &ctx,
+            "VaultGet",
+            &serde_json::json!({"key": "ANTHROPIC_API_KEY"}),
+        )
+        .await
+        .unwrap();
+        assert!(result.is_error);
+        assert!(result.content.contains("restricted"));
+    }
+
+    #[tokio::test]
+    async fn vault_get_nonexistent_key() {
+        let tmp = TempDir::new().unwrap();
+        let (ctx, _) = vault_ctx(&tmp).await;
+
+        let result =
+            handle_custom_tool(&ctx, "VaultGet", &serde_json::json!({"key": "NOPE"}))
+                .await
+                .unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn vault_list_excludes_system_keys() {
+        let tmp = TempDir::new().unwrap();
+        let (ctx, vault) = vault_ctx(&tmp).await;
+        vault.set("MY_KEY", "v", None).await.unwrap();
+        vault
+            .set("ANTHROPIC_API_KEY", "sk-xxx", None)
+            .await
+            .unwrap();
+
+        let result = handle_custom_tool(&ctx, "VaultList", &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("MY_KEY"));
+        assert!(!result.content.contains("ANTHROPIC_API_KEY"));
+    }
+
+    #[tokio::test]
+    async fn vault_set_stores_with_auto_hosts() {
+        let tmp = TempDir::new().unwrap();
+        let (ctx, vault) = vault_ctx(&tmp).await;
+
+        let result = handle_custom_tool(
+            &ctx,
+            "VaultSet",
+            &serde_json::json!({"key": "GITHUB_TOKEN", "value": "ghp_test"}),
+        )
+        .await
+        .unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("stored"));
+        assert!(result.content.contains("api.github.com"));
+
+        let entry = vault.get_entry("GITHUB_TOKEN").await.unwrap().unwrap();
+        assert!(entry.is_secret);
+        assert_eq!(
+            entry.allowed_hosts,
+            Some(vec!["api.github.com".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn vault_set_respects_is_secret_false() {
+        let tmp = TempDir::new().unwrap();
+        let (ctx, vault) = vault_ctx(&tmp).await;
+
+        let result = handle_custom_tool(
+            &ctx,
+            "VaultSet",
+            &serde_json::json!({
+                "key": "SENTRY_DSN",
+                "value": "https://sentry.io/123",
+                "is_secret": false
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(!result.is_error);
+
+        let entry = vault.get_entry("SENTRY_DSN").await.unwrap().unwrap();
+        assert!(!entry.is_secret);
+    }
+
+    #[tokio::test]
+    async fn vault_set_blocks_system_keys() {
+        let tmp = TempDir::new().unwrap();
+        let (ctx, _) = vault_ctx(&tmp).await;
+
+        let result = handle_custom_tool(
+            &ctx,
+            "VaultSet",
+            &serde_json::json!({"key": "OPENAI_API_KEY", "value": "sk-xxx"}),
+        )
+        .await
+        .unwrap();
+        assert!(result.is_error);
+        assert!(result.content.contains("system key"));
+    }
+
+    #[tokio::test]
+    async fn vault_delete_blocks_system_keys() {
+        let tmp = TempDir::new().unwrap();
+        let (ctx, _) = vault_ctx(&tmp).await;
+
+        let result = handle_custom_tool(
+            &ctx,
+            "VaultDelete",
+            &serde_json::json!({"key": "TELEGRAM_BOT_TOKEN"}),
+        )
+        .await
+        .unwrap();
+        assert!(result.is_error);
+        assert!(result.content.contains("system key"));
+    }
+
+    #[tokio::test]
+    async fn vault_delete_succeeds() {
+        let tmp = TempDir::new().unwrap();
+        let (ctx, vault) = vault_ctx(&tmp).await;
+        vault.set("MY_KEY", "val", None).await.unwrap();
+
+        let result = handle_custom_tool(
+            &ctx,
+            "VaultDelete",
+            &serde_json::json!({"key": "MY_KEY"}),
+        )
+        .await
+        .unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("deleted"));
+
+        assert!(vault.get("MY_KEY", None).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn vault_get_returns_none_without_vault() {
+        let tmp = TempDir::new().unwrap();
+        let (mut ctx, _) = vault_ctx(&tmp).await;
+        ctx.vault = None;
+
+        // Without a vault, VaultGet should return None (fall through)
+        let result =
+            handle_custom_tool(&ctx, "VaultGet", &serde_json::json!({"key": "X"})).await;
+        assert!(result.is_none());
+    }
+
+    #[cfg(feature = "secret-proxy")]
+    #[tokio::test]
+    async fn vault_get_returns_opaque_when_proxy_enabled() {
+        let tmp = TempDir::new().unwrap();
+        let (mut ctx, vault) = vault_ctx(&tmp).await;
+        ctx.proxy_enabled = true;
+
+        vault
+            .set_with_meta(
+                "TOKEN",
+                "real-secret",
+                true,
+                Some(&["api.x.com".into()]),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let result =
+            handle_custom_tool(&ctx, "VaultGet", &serde_json::json!({"key": "TOKEN"}))
+                .await
+                .unwrap();
+        assert!(!result.is_error);
+        assert!(
+            result.content.starts_with("starpod:v1:"),
+            "Expected opaque token, got: {}",
+            result.content
+        );
+
+        // Decode it to verify contents
+        let (val, hosts) =
+            starpod_vault::opaque::decode_opaque_token(vault.cipher(), &result.content)
+                .unwrap();
+        assert_eq!(val, "real-secret");
+        assert_eq!(hosts, vec!["api.x.com"]);
+    }
+
+    #[cfg(feature = "secret-proxy")]
+    #[tokio::test]
+    async fn vault_get_returns_plaintext_for_non_secret_when_proxy_enabled() {
+        let tmp = TempDir::new().unwrap();
+        let (mut ctx, vault) = vault_ctx(&tmp).await;
+        ctx.proxy_enabled = true;
+
+        vault
+            .set_with_meta("CONFIG_VAR", "plain-value", false, None, None)
+            .await
+            .unwrap();
+
+        let result = handle_custom_tool(
+            &ctx,
+            "VaultGet",
+            &serde_json::json!({"key": "CONFIG_VAR"}),
+        )
+        .await
+        .unwrap();
+        assert!(!result.is_error);
+        // Non-secret should be plaintext even with proxy on
+        assert_eq!(result.content, "plain-value");
+    }
+
+    #[tokio::test]
+    async fn vault_list_shows_metadata() {
+        let tmp = TempDir::new().unwrap();
+        let (ctx, vault) = vault_ctx(&tmp).await;
+        vault
+            .set_with_meta("KEY", "v", false, Some(&["h.com".into()]), None)
+            .await
+            .unwrap();
+
+        let result = handle_custom_tool(&ctx, "VaultList", &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert!(!result.is_error);
+
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0]["key"], "KEY");
+        assert_eq!(parsed[0]["is_secret"], false);
+        assert_eq!(parsed[0]["allowed_hosts"][0], "h.com");
+    }
+
+    #[tokio::test]
+    async fn vault_set_with_explicit_hosts() {
+        let tmp = TempDir::new().unwrap();
+        let (ctx, vault) = vault_ctx(&tmp).await;
+
+        let result = handle_custom_tool(
+            &ctx,
+            "VaultSet",
+            &serde_json::json!({
+                "key": "MY_TOKEN",
+                "value": "tok_abc",
+                "allowed_hosts": ["custom.api.com", "backup.api.com"]
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(!result.is_error);
+
+        let entry = vault.get_entry("MY_TOKEN").await.unwrap().unwrap();
+        assert_eq!(
+            entry.allowed_hosts,
+            Some(vec![
+                "custom.api.com".to_string(),
+                "backup.api.com".to_string()
+            ])
         );
     }
 }

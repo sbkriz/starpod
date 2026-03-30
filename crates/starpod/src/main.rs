@@ -420,7 +420,7 @@ async fn resolve_agent() -> anyhow::Result<(StarpodAgent, StarpodConfig, Resolve
 }
 
 /// Read all secrets from vault and inject into process environment variables.
-async fn inject_vault_env(paths: &ResolvedPaths) -> anyhow::Result<()> {
+async fn inject_vault_env(paths: &ResolvedPaths, proxy_enabled: bool) -> anyhow::Result<()> {
     let vault_path = paths.db_dir.join("vault.db");
     if !vault_path.exists() {
         return Ok(());
@@ -429,6 +429,29 @@ async fn inject_vault_env(paths: &ResolvedPaths) -> anyhow::Result<()> {
     let vault = starpod_vault::Vault::new(&vault_path, &master_key).await?;
     for key in vault.list_keys().await? {
         if let Some(val) = vault.get(&key, None).await? {
+            #[cfg(feature = "secret-proxy")]
+            if proxy_enabled {
+                let entry = vault.get_entry(&key).await?.unwrap_or_else(|| {
+                    starpod_vault::VaultEntry {
+                        key: key.clone(),
+                        is_secret: true,
+                        allowed_hosts: None,
+                        created_at: String::new(),
+                        updated_at: String::new(),
+                    }
+                });
+                if entry.is_secret {
+                    let hosts = entry.allowed_hosts.unwrap_or_default();
+                    let token = starpod_vault::opaque::encode_opaque_token(
+                        vault.cipher(),
+                        &val,
+                        &hosts,
+                    )?;
+                    std::env::set_var(&key, &token);
+                    continue;
+                }
+            }
+            let _ = proxy_enabled; // suppress unused warning when feature disabled
             std::env::set_var(&key, &val);
         }
     }
@@ -589,7 +612,7 @@ async fn main() -> anyhow::Result<()> {
         // ── Dev: start agent in development mode ─────────────────────
         Commands::Dev { port } => {
             let (agent, mut config, paths) = resolve_agent().await?;
-            inject_vault_env(&paths).await?;
+            inject_vault_env(&paths, config.proxy.enabled).await?;
 
             // Override port if specified
             if let Some(p) = port {
@@ -635,7 +658,7 @@ async fn main() -> anyhow::Result<()> {
         // ── Serve: production mode ──────────────────────────────────
         Commands::Serve => {
             let (agent, config, paths) = resolve_agent().await?;
-            inject_vault_env(&paths).await?;
+            inject_vault_env(&paths, config.proxy.enabled).await?;
 
             let addr = config.server_addr.clone();
             let display_name = config.agent_name.clone();
@@ -686,7 +709,7 @@ async fn main() -> anyhow::Result<()> {
         // ── Repl ────────────────────────────────────────────────────
         Commands::Repl => {
             let (agent, config, paths) = resolve_agent().await?;
-            inject_vault_env(&paths).await?;
+            inject_vault_env(&paths, config.proxy.enabled).await?;
             let name = config.agent_name.clone();
             run_repl(agent, &name).await?;
         }
@@ -708,7 +731,7 @@ async fn main() -> anyhow::Result<()> {
                     (agent, starpod_config, paths)
                 }
             };
-            inject_vault_env(&paths).await?;
+            inject_vault_env(&paths, config.proxy.enabled).await?;
 
             let name = config.agent_name.clone();
             print_header_with_name(&name);
