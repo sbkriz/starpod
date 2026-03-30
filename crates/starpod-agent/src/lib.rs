@@ -1164,6 +1164,11 @@ impl StarpodAgent {
                     .env("NODE_EXTRA_CA_CERTS", &ca)
                     .env("REQUESTS_CA_BUNDLE", &ca);
             }
+            // Tier 1: network namespace pre_exec hook (Linux only)
+            #[cfg(all(unix, feature = "secret-proxy-netns"))]
+            if let Some(hook) = handle.pre_exec_hook() {
+                builder = builder.pre_exec_fn(hook);
+            }
         }
 
         // Resume existing session to load conversation history, or set ID for new ones
@@ -1492,6 +1497,11 @@ impl StarpodAgent {
                     .env("SSL_CERT_FILE", &ca)
                     .env("NODE_EXTRA_CA_CERTS", &ca)
                     .env("REQUESTS_CA_BUNDLE", &ca);
+            }
+            // Tier 1: network namespace pre_exec hook (Linux only)
+            #[cfg(all(unix, feature = "secret-proxy-netns"))]
+            if let Some(hook) = handle.pre_exec_hook() {
+                builder = builder.pre_exec_fn(hook);
             }
         }
 

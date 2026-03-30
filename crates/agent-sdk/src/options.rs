@@ -235,6 +235,12 @@ pub struct Options {
     /// preventing the agent from reading them through shell commands.
     pub env_blocklist: Vec<String>,
 
+    /// Optional pre-exec hook for subprocesses (Unix only).
+    /// Called in the child process after `fork()` but before `execve()`.
+    /// Used for network namespace isolation (secret proxy Phase 4).
+    #[cfg(unix)]
+    pub pre_exec_fn: Option<Box<dyn Fn() -> std::io::Result<()> + Send + Sync>>,
+
     /// Structured output schema.
     pub output_format: Option<serde_json::Value>,
 
@@ -393,6 +399,8 @@ impl Default for Options {
             env: HashMap::new(),
             additional_directories: Vec::new(),
             env_blocklist: Vec::new(),
+            #[cfg(unix)]
+            pre_exec_fn: None,
             output_format: None,
             sandbox: None,
             tool_config: None,
@@ -456,6 +464,17 @@ impl OptionsBuilder {
 
     pub fn env_blocklist(mut self, keys: Vec<String>) -> Self {
         self.options.env_blocklist = keys;
+        self
+    }
+
+    /// Set a pre-exec hook for subprocesses (Unix only).
+    /// Called in the child after fork, before exec. Used for netns isolation.
+    #[cfg(unix)]
+    pub fn pre_exec_fn(
+        mut self,
+        f: Box<dyn Fn() -> std::io::Result<()> + Send + Sync>,
+    ) -> Self {
+        self.options.pre_exec_fn = Some(f);
         self
     }
 

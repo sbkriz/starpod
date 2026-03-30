@@ -35,6 +35,9 @@ pub mod scan;
 pub mod ca;
 #[cfg(feature = "mitm")]
 mod mitm;
+#[cfg(feature = "netns")]
+pub mod netns;
+pub mod tier;
 
 mod http;
 mod tunnel;
@@ -67,6 +70,10 @@ pub struct ProxyHandle {
     /// Path to the CA cert bundle (system roots + local CA).
     /// `None` when MITM is not enabled.
     pub ca_cert_path: Option<PathBuf>,
+    /// Network namespace handle (Linux only, Tier 1).
+    /// When `Some`, tool subprocesses should enter this namespace.
+    #[cfg(feature = "netns")]
+    pub ns_handle: Option<netns::NamespaceHandle>,
     shutdown_tx: watch::Sender<bool>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -81,6 +88,18 @@ impl ProxyHandle {
     pub async fn shutdown(self) {
         let _ = self.shutdown_tx.send(true);
         let _ = self.task.await;
+    }
+
+    /// Get a pre_exec hook for subprocess namespace isolation (Tier 1).
+    ///
+    /// Returns `Some` when a network namespace is active. The returned closure
+    /// should be passed to `ToolExecutor::with_pre_exec()` so that all tool
+    /// subprocesses enter the isolated namespace.
+    #[cfg(feature = "netns")]
+    pub fn pre_exec_hook(
+        &self,
+    ) -> Option<Box<dyn Fn() -> std::io::Result<()> + Send + Sync>> {
+        self.ns_handle.as_ref().map(|ns| ns.pre_exec_fn())
     }
 }
 
@@ -101,6 +120,25 @@ pub async fn start_proxy(config: ProxyConfig) -> Result<ProxyHandle> {
     let addr = listener
         .local_addr()
         .map_err(|e| StarpodError::Proxy(format!("Failed to get proxy address: {e}")))?;
+
+    // Detect isolation tier
+    let _tier = tier::detect_and_log();
+
+    // Create network namespace for Tier 1 isolation (Linux + CAP_NET_ADMIN)
+    #[cfg(feature = "netns")]
+    let ns_handle = {
+        if _tier == tier::IsolationTier::NetNamespace {
+            match netns::create_namespace(addr.port()) {
+                Ok(handle) => Some(handle),
+                Err(e) => {
+                    tracing::warn!("Failed to create network namespace: {e} — falling back to env var proxy");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    };
 
     // Initialize CA for MITM if feature enabled
     #[cfg(feature = "mitm")]
@@ -192,6 +230,8 @@ pub async fn start_proxy(config: ProxyConfig) -> Result<ProxyHandle> {
     Ok(ProxyHandle {
         addr,
         ca_cert_path,
+        #[cfg(feature = "netns")]
+        ns_handle,
         shutdown_tx,
         task,
     })

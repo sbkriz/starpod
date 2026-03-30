@@ -295,13 +295,19 @@ async fn run_agent_loop(
         .collect();
     let env_blocklist = std::mem::take(&mut options.env_blocklist);
     let env_inject = std::mem::take(&mut options.env);
-    let tool_executor = if additional_dirs.is_empty() {
+    #[cfg(unix)]
+    let pre_exec_fn = options.pre_exec_fn.take();
+    let mut tool_executor = if additional_dirs.is_empty() {
         ToolExecutor::new(PathBuf::from(&cwd))
     } else {
         ToolExecutor::with_allowed_dirs(PathBuf::from(&cwd), additional_dirs)
     }
     .with_env_blocklist(env_blocklist)
     .with_env_inject(env_inject);
+    #[cfg(unix)]
+    if let Some(f) = pre_exec_fn {
+        tool_executor = tool_executor.with_pre_exec(f);
+    }
 
     // Build hook registry from options, merging file-discovered hooks
     let mut hook_registry = HookRegistry::from_map(std::mem::take(&mut options.hooks));

@@ -11,6 +11,7 @@ description = "Orchestrator for Starpod - wires agent-sdk + memory + session + v
 default = []
 embeddings = ["starpod-memory/embeddings"]
 secret-proxy = ["starpod-vault/secret-proxy", "dep:starpod-proxy", "starpod-proxy/mitm"]
+secret-proxy-netns = ["secret-proxy", "starpod-proxy/netns"]
 
 [dependencies]
 agent-sdk = { workspace = true }

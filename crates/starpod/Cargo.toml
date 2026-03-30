@@ -15,6 +15,7 @@ path = "src/main.rs"
 default = ["embeddings"]
 embeddings = ["starpod-agent/embeddings"]
 secret-proxy = ["starpod-agent/secret-proxy", "starpod-vault/secret-proxy"]
+secret-proxy-netns = ["secret-proxy", "starpod-agent/secret-proxy-netns"]
 
 [dependencies]
 agent-sdk = { workspace = true }

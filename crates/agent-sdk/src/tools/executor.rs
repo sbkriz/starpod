@@ -5,7 +5,12 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
+
+#[cfg(unix)]
+#[allow(unused_imports)]
+use std::os::unix::process::CommandExt;
 
 use glob::glob as glob_match;
 use regex::{Regex, RegexBuilder};
@@ -86,6 +91,10 @@ pub struct ToolExecutor {
     /// Additional environment variables to inject into child processes (Bash).
     /// Used by the secret proxy to set `HTTP_PROXY`, `HTTPS_PROXY`, etc.
     env_inject: HashMap<String, String>,
+    /// Optional pre-exec hook (Unix only). Runs in the child process after
+    /// fork but before exec. Used for network namespace isolation.
+    #[cfg(unix)]
+    pre_exec: Option<Arc<dyn Fn() -> std::io::Result<()> + Send + Sync>>,
 }
 
 /// Guides file-based tools to stay within a set of allowed directory trees.
@@ -200,6 +209,8 @@ impl ToolExecutor {
             boundary: None,
             env_blocklist: Vec::new(),
             env_inject: HashMap::new(),
+            #[cfg(unix)]
+            pre_exec: None,
         }
     }
 
@@ -212,6 +223,8 @@ impl ToolExecutor {
             boundary: Some(boundary),
             env_blocklist: Vec::new(),
             env_inject: HashMap::new(),
+            #[cfg(unix)]
+            pre_exec: None,
         }
     }
 
@@ -225,6 +238,17 @@ impl ToolExecutor {
     /// Used by the secret proxy to set `HTTP_PROXY`, `HTTPS_PROXY`, etc.
     pub fn with_env_inject(mut self, env: HashMap<String, String>) -> Self {
         self.env_inject = env;
+        self
+    }
+
+    /// Set a pre-exec hook for child processes (Unix only).
+    /// Runs after fork, before exec — used for network namespace isolation.
+    #[cfg(unix)]
+    pub fn with_pre_exec(
+        mut self,
+        f: Box<dyn Fn() -> std::io::Result<()> + Send + Sync>,
+    ) -> Self {
+        self.pre_exec = Some(Arc::from(f));
         self
     }
 
@@ -504,6 +528,15 @@ impl ToolExecutor {
             for key in &self.env_blocklist {
                 cmd.env_remove(key);
             }
+            #[cfg(unix)]
+            if let Some(ref hook) = self.pre_exec {
+                let hook = Arc::clone(hook);
+                // SAFETY: pre_exec runs in the child after fork, before exec.
+                // The hook is Send+Sync and captures only owned data (namespace path).
+                unsafe {
+                    cmd.pre_exec(move || (hook)());
+                }
+            }
             let child = cmd.spawn();
 
             return match child {
@@ -534,6 +567,13 @@ impl ToolExecutor {
         }
         for key in &self.env_blocklist {
             cmd.env_remove(key);
+        }
+        #[cfg(unix)]
+        if let Some(ref hook) = self.pre_exec {
+            let hook = Arc::clone(hook);
+            unsafe {
+                cmd.pre_exec(move || (hook)());
+            }
         }
         let child = cmd.spawn();
 
