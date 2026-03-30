@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS session_metadata (
     title TEXT,
     user_id TEXT NOT NULL DEFAULT 'admin',
     is_read INTEGER NOT NULL DEFAULT 1,
+    is_archived INTEGER NOT NULL DEFAULT 0,
     triggered_by TEXT
 );
 

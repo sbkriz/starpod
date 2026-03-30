@@ -20,6 +20,14 @@ export function markSessionRead(sessionId, isRead = true) {
   }).catch(() => {})
 }
 
+export function archiveSession(sessionId, archived = true) {
+  return fetch(`/api/sessions/${sessionId}/archive`, {
+    method: 'POST',
+    headers: apiHeaders(),
+    body: JSON.stringify({ archived }),
+  }).catch(() => {})
+}
+
 let cachedSkills = null
 let skillsFetchedAt = 0
 const SKILLS_TTL = 30_000
@@ -87,6 +95,14 @@ export async function pollHealthForVersion(targetVersion, timeoutMs = 30000) {
     } catch {}
   }
   return false
+}
+
+export async function fetchConfig() {
+  try {
+    const resp = await fetch('/api/config', { headers: authHeaders() })
+    if (resp.ok) return await resp.json()
+  } catch {}
+  return null
 }
 
 let cachedModels = null

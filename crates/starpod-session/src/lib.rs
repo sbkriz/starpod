@@ -59,6 +59,7 @@ pub struct SessionMeta {
     pub channel_session_key: Option<String>,
     pub user_id: String,
     pub is_read: bool,
+    pub is_archived: bool,
     /// Cron job name or `"__heartbeat__"` if this session was triggered by a scheduled job.
     /// `None` for regular user sessions.
     pub triggered_by: Option<String>,
@@ -251,6 +252,17 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Archive or unarchive a session.
+    pub async fn archive_session(&self, id: &str, archived: bool) -> Result<()> {
+        sqlx::query("UPDATE session_metadata SET is_archived = ?2 WHERE id = ?1")
+            .bind(id)
+            .bind(archived as i64)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StarpodError::Database(format!("Archive session failed: {}", e)))?;
+        Ok(())
+    }
+
     /// Update the last_message_at timestamp and increment message_count.
     pub async fn touch_session(&self, id: &str) -> Result<()> {
         let now = Utc::now().to_rfc3339();
@@ -314,11 +326,12 @@ impl SessionManager {
         Ok(())
     }
 
-    /// List sessions, most recent first.
+    /// List sessions, most recent first. Excludes archived sessions by default.
     pub async fn list_sessions(&self, limit: usize) -> Result<Vec<SessionMeta>> {
         let rows = sqlx::query(
-            "SELECT id, created_at, last_message_at, is_closed, summary, title, message_count, channel, channel_session_key, user_id, is_read, triggered_by
+            "SELECT id, created_at, last_message_at, is_closed, summary, title, message_count, channel, channel_session_key, user_id, is_read, is_archived, triggered_by
              FROM session_metadata
+             WHERE is_archived = 0
              ORDER BY last_message_at DESC
              LIMIT ?1",
         )
@@ -335,7 +348,7 @@ impl SessionManager {
     /// Get a specific session by ID.
     pub async fn get_session(&self, id: &str) -> Result<Option<SessionMeta>> {
         let row = sqlx::query(
-            "SELECT id, created_at, last_message_at, is_closed, summary, title, message_count, channel, channel_session_key, user_id, is_read, triggered_by
+            "SELECT id, created_at, last_message_at, is_closed, summary, title, message_count, channel, channel_session_key, user_id, is_read, is_archived, triggered_by
              FROM session_metadata WHERE id = ?1",
         )
         .bind(id)
@@ -675,6 +688,7 @@ fn session_meta_from_row(row: &sqlx::sqlite::SqliteRow) -> SessionMeta {
             .try_get("user_id")
             .unwrap_or_else(|_| "admin".to_string()),
         is_read: row.try_get::<i64, _>("is_read").unwrap_or(1) != 0,
+        is_archived: row.try_get::<i64, _>("is_archived").unwrap_or(0) != 0,
         triggered_by: row.try_get("triggered_by").unwrap_or(None),
     }
 }
@@ -1777,6 +1791,64 @@ mod tests {
         let (_tmp, mgr) = setup().await;
         // Should not error — just a no-op UPDATE matching zero rows
         mgr.mark_read("nonexistent-id", true).await.unwrap();
+    }
+
+    // --- Archive tests ---
+
+    #[tokio::test]
+    async fn test_archive_session() {
+        let (_tmp, mgr) = setup().await;
+        let id = mgr.create_session(&Channel::Main, "k1").await.unwrap();
+
+        // Newly created session is not archived
+        let session = mgr.get_session(&id).await.unwrap().unwrap();
+        assert!(!session.is_archived);
+
+        // Archive it
+        mgr.archive_session(&id, true).await.unwrap();
+        let session = mgr.get_session(&id).await.unwrap().unwrap();
+        assert!(session.is_archived);
+
+        // Unarchive it
+        mgr.archive_session(&id, false).await.unwrap();
+        let session = mgr.get_session(&id).await.unwrap().unwrap();
+        assert!(!session.is_archived);
+    }
+
+    #[tokio::test]
+    async fn test_archived_sessions_excluded_from_list() {
+        let (_tmp, mgr) = setup().await;
+        let id1 = mgr.create_session(&Channel::Main, "k1").await.unwrap();
+        let id2 = mgr.create_session(&Channel::Main, "k2").await.unwrap();
+        let id3 = mgr.create_session(&Channel::Main, "k3").await.unwrap();
+
+        // Archive one session
+        mgr.archive_session(&id2, true).await.unwrap();
+
+        let sessions = mgr.list_sessions(10).await.unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.iter().any(|s| s.id == id1));
+        assert!(!sessions.iter().any(|s| s.id == id2), "Archived session should not appear");
+        assert!(sessions.iter().any(|s| s.id == id3));
+    }
+
+    #[tokio::test]
+    async fn test_archived_session_still_accessible_by_id() {
+        let (_tmp, mgr) = setup().await;
+        let id = mgr.create_session(&Channel::Main, "k1").await.unwrap();
+        mgr.archive_session(&id, true).await.unwrap();
+
+        // get_session should still return it (direct lookup, not filtered)
+        let session = mgr.get_session(&id).await.unwrap();
+        assert!(session.is_some());
+        assert!(session.unwrap().is_archived);
+    }
+
+    #[tokio::test]
+    async fn test_archive_nonexistent_session_succeeds() {
+        let (_tmp, mgr) = setup().await;
+        // Should not error — just a no-op UPDATE matching zero rows
+        mgr.archive_session("nonexistent-id", true).await.unwrap();
     }
 
     // --- Email channel tests ---

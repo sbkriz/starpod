@@ -47,6 +47,10 @@ pub fn api_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
             get(get_session_messages_handler),
         )
         .route("/api/sessions/{id}/read", post(mark_session_read_handler))
+        .route(
+            "/api/sessions/{id}/archive",
+            post(archive_session_handler),
+        )
         .route("/api/memory/search", get(memory_search_handler))
         .route("/api/memory/reindex", post(reindex_handler))
         .route("/api/instances", get(list_instances_handler))
@@ -62,6 +66,7 @@ pub fn api_routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
             post(restart_instance_handler),
         )
         .route("/api/instances/{id}/health", get(instance_health_handler))
+        .route("/api/config", get(frontend_config_handler))
         .route("/api/health", get(health_handler))
         .route(
             "/api/cron/jobs",
@@ -457,6 +462,41 @@ async fn mark_session_read_handler(
     }
 }
 
+/// Archive/unarchive session — POST /api/sessions/:id/archive
+#[derive(Debug, Deserialize)]
+struct ArchiveSessionRequest {
+    #[serde(default = "default_archived")]
+    archived: bool,
+}
+
+fn default_archived() -> bool {
+    true
+}
+
+async fn archive_session_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<ArchiveSessionRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    authenticate_request(&state, &headers).await?;
+
+    match state
+        .agent
+        .session_mgr()
+        .archive_session(&id, body.archived)
+        .await
+    {
+        Ok(()) => Ok(Json(serde_json::json!({ "ok": true }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Archive session error: {}", e),
+            }),
+        )),
+    }
+}
+
 /// Query params for memory search.
 #[derive(Debug, Deserialize)]
 struct MemorySearchQuery {
@@ -529,6 +569,18 @@ async fn reindex_handler(
 /// Health check — GET /api/health
 async fn health_handler() -> Json<serde_json::Value> {
     Json(serde_json::json!({"status": "ok", "version": env!("CARGO_PKG_VERSION")}))
+}
+
+/// Return the live frontend config (same shape as `window.__STARPOD__`).
+async fn frontend_config_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let cfg = state.config.read().unwrap();
+    let frontend = starpod_core::FrontendConfig::load(&state.paths.config_dir);
+    Json(serde_json::json!({
+        "greeting": frontend.greeting,
+        "prompts": frontend.prompts,
+        "models": cfg.models,
+        "agent_name": cfg.agent_name,
+    }))
 }
 
 /// Error response body.
@@ -1237,6 +1289,131 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // ── Archive session endpoint tests ────────────────────────────────
+
+    #[tokio::test]
+    async fn archive_session_pre_bootstrap() {
+        let (_tmp, state) = test_app_state().await;
+
+        let session_mgr = state.agent.session_mgr();
+        let sid = session_mgr
+            .create_session(&starpod_session::Channel::Main, "k1")
+            .await
+            .unwrap();
+
+        // Archive via API
+        let app = build_router(Arc::clone(&state));
+        let body = serde_json::json!({ "archived": true });
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{sid}/archive"))
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Archived session should not appear in list
+        let app = build_router(Arc::clone(&state));
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/sessions?limit=10")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let sessions = json.as_array().unwrap();
+        assert!(
+            !sessions.iter().any(|s| s["id"] == sid),
+            "Archived session should not appear in list"
+        );
+
+        // But still accessible by direct get
+        let app = build_router(Arc::clone(&state));
+        let req = Request::builder()
+            .method("GET")
+            .uri(format!("/api/sessions/{sid}"))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["is_archived"], true);
+
+        // Unarchive via API
+        let app = build_router(Arc::clone(&state));
+        let body = serde_json::json!({ "archived": false });
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{sid}/archive"))
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Should reappear in list
+        let app = build_router(Arc::clone(&state));
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/sessions?limit=10")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let sessions = json.as_array().unwrap();
+        assert!(sessions.iter().any(|s| s["id"] == sid));
+    }
+
+    #[tokio::test]
+    async fn archive_session_requires_auth() {
+        let (_tmp, state) = test_app_state().await;
+        state
+            .auth
+            .create_user(None, None, starpod_auth::Role::Admin)
+            .await
+            .unwrap();
+
+        let app = build_router(Arc::clone(&state));
+        let body = serde_json::json!({ "archived": true });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/sessions/some-id/archive")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn archive_session_defaults_to_true() {
+        let (_tmp, state) = test_app_state().await;
+
+        let session_mgr = state.agent.session_mgr();
+        let sid = session_mgr
+            .create_session(&starpod_session::Channel::Main, "k1")
+            .await
+            .unwrap();
+
+        // Empty body should default archived to true
+        let app = build_router(Arc::clone(&state));
+        let body = serde_json::json!({});
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{sid}/archive"))
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let session = session_mgr.get_session(&sid).await.unwrap().unwrap();
+        assert!(session.is_archived);
     }
 
     // ── Cron jobs endpoint tests ────────────────────────────────────────

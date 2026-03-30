@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { useApp, isMobile } from '../contexts/AppContext'
 import { useUser } from './AuthGate'
 import { formatSessionDate } from '../lib/utils'
-import { markSessionRead } from '../lib/api'
+import { markSessionRead, archiveSession } from '../lib/api'
 import IconButton from './ui/IconButton'
 import { ComposeIcon, CloseIcon, GearIcon, SearchIcon } from './ui/Icons'
 import { StarpodIcon } from './ui/Logo'
@@ -39,7 +39,7 @@ function Sidebar({ onSelectSession, onNewChat }) {
   const isTransient = sidebarOpen && !!previewUrl
   const [searchQuery, setSearchQuery] = useState('')
 
-  const cfg = window.__STARPOD__ || {}
+  const cfg = state.config || {}
   const agentName = cfg.agent_name || 'Starpod'
 
   function closeSidebar() {
@@ -62,6 +62,12 @@ function Sidebar({ onSelectSession, onNewChat }) {
     }
     if (isMobile()) closeSidebar()
     if (onSelectSession) onSelectSession(session)
+  }
+
+  function handleArchive(e, session) {
+    e.stopPropagation()
+    archiveSession(session.id)
+    dispatch({ type: 'ARCHIVE_SESSION', payload: session.id })
   }
 
   function handleSettingsClick() {
@@ -112,7 +118,7 @@ function Sidebar({ onSelectSession, onNewChat }) {
     return (
       <button
         key={s.id}
-        className={`session-item px-3 py-2.5 rounded-none cursor-pointer mb-0.5 w-full text-left${active ? ' active' : ''}`}
+        className={`session-item px-3 py-2.5 rounded-none cursor-pointer mb-0.5 w-full text-left group${active ? ' active' : ''}`}
         data-sid={s.id}
         onClick={() => handleSessionClick(s)}
       >
@@ -126,6 +132,17 @@ function Sidebar({ onSelectSession, onNewChat }) {
               {summary}
             </div>
           </div>
+          <span
+            className="shrink-0 opacity-0 group-hover:opacity-100 text-dim hover:text-primary transition-opacity cursor-pointer"
+            onClick={(e) => handleArchive(e, s)}
+            title="Archive"
+          >
+            <svg className="w-3.5 h-3.5 stroke-current fill-none stroke-[1.5]" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="21 8 21 21 3 21 3 8" />
+              <rect x="1" y="3" width="22" height="5" />
+              <line x1="10" y1="12" x2="14" y2="12" />
+            </svg>
+          </span>
         </div>
       </button>
     )

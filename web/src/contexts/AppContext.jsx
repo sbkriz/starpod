@@ -1,5 +1,6 @@
-import { createContext, useContext, useReducer } from 'react'
+import { createContext, useContext, useReducer, useCallback } from 'react'
 import { generateUUID } from '../lib/utils'
+import { fetchConfig } from '../lib/api'
 
 function parseHash() {
   const hash = window.location.hash
@@ -35,6 +36,7 @@ const initialState = {
   previewUrl: null,
   selectedModel: null, // null = use default (first in models list)
   chatTitle: null, // first user message, shown in header
+  config: window.__STARPOD__ || {},
 }
 
 function appReducer(state, action) {
@@ -119,6 +121,15 @@ function appReducer(state, action) {
         ),
       }
 
+    case 'ARCHIVE_SESSION':
+      return {
+        ...state,
+        sessions: state.sessions.filter(s => s.id !== action.payload),
+        ...(state.currentSessionId === action.payload
+          ? { currentSessionId: null, currentSessionKey: generateUUID(), chatTitle: null }
+          : {}),
+      }
+
     case 'SET_MODEL':
       return { ...state, selectedModel: action.payload }
 
@@ -131,6 +142,9 @@ function appReducer(state, action) {
     case 'CLOSE_PREVIEW':
       return { ...state, previewUrl: null }
 
+    case 'SET_CONFIG':
+      return { ...state, config: action.payload }
+
     default:
       return state
   }
@@ -140,8 +154,13 @@ export const AppContext = createContext(null)
 
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(appReducer, initialState)
+  const refreshConfig = useCallback(() => {
+    fetchConfig().then(cfg => {
+      if (cfg) dispatch({ type: 'SET_CONFIG', payload: cfg })
+    })
+  }, [])
   return (
-    <AppContext.Provider value={{ state, dispatch }}>
+    <AppContext.Provider value={{ state, dispatch, refreshConfig }}>
       {children}
     </AppContext.Provider>
   )
