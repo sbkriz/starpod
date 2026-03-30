@@ -16,6 +16,10 @@ export default function OnboardingGate({ children }) {
       }
       const data = await resp.json()
       setSetupData(data)
+      if (data.complete) {
+        // Notify parent window (Aster) that setup is already done
+        window.parent.postMessage({ type: 'starpod-setup-complete' }, '*')
+      }
       setStatus(data.complete ? 'ready' : 'needs_setup')
     } catch {
       // Network error or other failure — skip onboarding gracefully
@@ -37,7 +41,10 @@ export default function OnboardingGate({ children }) {
     return (
       <OnboardingWizard
         initialData={setupData}
-        onComplete={() => setStatus('ready')}
+        onComplete={() => {
+          window.parent.postMessage({ type: 'starpod-setup-complete' }, '*')
+          setStatus('ready')
+        }}
       />
     )
   }
