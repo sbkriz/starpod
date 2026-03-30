@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
+import { useApp } from '../../contexts/AppContext'
 import { apiHeaders } from '../../lib/api'
 import { Card, Row, Input, Field, SaveBar } from './fields'
 import { Loading } from '../ui/EmptyState'
 
 export default function FrontendTab() {
+  const { refreshConfig } = useApp()
   const [config, setConfig] = useState(null)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState(null)
@@ -28,7 +30,8 @@ export default function FrontendTab() {
     setSaving(true); setStatus(null)
     try {
       const resp = await fetch('/api/settings/frontend', { method: 'PUT', headers: apiHeaders(), body: JSON.stringify(config) })
-      setStatus(resp.ok ? { type: 'ok', text: 'Saved' } : { type: 'error', text: 'Failed' })
+      if (resp.ok) { setStatus({ type: 'ok', text: 'Saved' }); refreshConfig() }
+      else setStatus({ type: 'error', text: 'Failed' })
     } catch (e) { setStatus({ type: 'error', text: e.message }) }
     setSaving(false)
   }

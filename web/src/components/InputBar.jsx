@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
+import { useApp } from '../contexts/AppContext'
 import { PaperclipIcon } from './ui/Icons'
 import SlashMenu, { filterSkills } from './SlashMenu'
 import { fetchSkills } from '../lib/api'
@@ -15,6 +16,7 @@ function readFileAsBase64(file) {
 }
 
 function InputBar({ onSend, disabled }) {
+  const { state } = useApp()
   const [pendingAttachments, setPendingAttachments] = useState([])
   const [slashOpen, setSlashOpen] = useState(false)
   const [slashFilter, setSlashFilter] = useState('')
@@ -174,7 +176,7 @@ function InputBar({ onSend, disabled }) {
     }
   }, [addFiles])
 
-  const cfg = window.__STARPOD__ || {}
+  const cfg = state.config || {}
   const agentName = cfg.agent_name || 'Starpod'
   const hasContent = textareaRef.current?.value?.trim() || pendingAttachments.length > 0
 

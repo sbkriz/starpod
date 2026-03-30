@@ -25,7 +25,7 @@ function AppInner() {
   const reconnectAttemptRef = useRef(0)
 
   // ── Dynamic page title ──
-  const agentName = (window.__STARPOD__?.agent_name) || 'Starpod'
+  const agentName = (state.config?.agent_name) || 'Starpod'
   const pageLabel = useMemo(() => {
     if (settingsVisible) return `Settings · ${(settingsActiveTab || 'general').replace(/^./, c => c.toUpperCase())}`
     if (cronVisible) return 'Schedules'

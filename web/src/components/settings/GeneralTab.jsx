@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useApp } from '../../contexts/AppContext'
 import { apiHeaders, fetchModels, fetchSystemVersion, triggerUpdate, pollHealthForVersion } from '../../lib/api'
 import { Card, Row, Field, Input, Select, ModelSelect, Toggle, SaveBar } from './fields'
 import { Loading } from '../ui/EmptyState'
@@ -124,6 +125,7 @@ function VersionCard() {
 }
 
 export default function GeneralTab() {
+  const { refreshConfig } = useApp()
   const [config, setConfig] = useState(null)
   const [catalog, setCatalog] = useState({}) // full model catalog by provider
   const [saving, setSaving] = useState(false)
@@ -168,7 +170,8 @@ export default function GeneralTab() {
     setSaving(true); setStatus(null)
     try {
       const resp = await fetch('/api/settings/general', { method: 'PUT', headers: apiHeaders(), body: JSON.stringify(config) })
-      setStatus(resp.ok ? { type: 'ok', text: 'Saved' } : { type: 'error', text: 'Failed' })
+      if (resp.ok) { setStatus({ type: 'ok', text: 'Saved' }); refreshConfig() }
+      else setStatus({ type: 'error', text: 'Failed' })
     } catch (e) { setStatus({ type: 'error', text: e.message }) }
     setSaving(false)
   }

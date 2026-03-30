@@ -1,8 +1,10 @@
 import React from 'react'
+import { useApp } from '../contexts/AppContext'
 import { StarpodIcon } from './ui/Logo'
 
 function Welcome({ onSendPrompt }) {
-  const cfg = window.__STARPOD__ || {}
+  const { state } = useApp()
+  const cfg = state.config || {}
   const agentName = cfg.agent_name || 'Starpod'
   const greeting = cfg.greeting || 'What can I help with?'
   const prompts = cfg.prompts || []

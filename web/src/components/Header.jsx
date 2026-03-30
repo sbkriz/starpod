@@ -17,7 +17,7 @@ function Header() {
   const { isAdmin } = useUser()
   const { wsStatus, selectedModel, chatTitle } = state
 
-  const cfg = window.__STARPOD__ || {}
+  const cfg = state.config || {}
   const models = cfg.models || []
   const agentName = cfg.agent_name || 'starpod'
   const activeModel = selectedModel || models[0] || null
