@@ -10,7 +10,7 @@ description = "Orchestrator for Starpod - wires agent-sdk + memory + session + v
 [features]
 default = []
 embeddings = ["starpod-memory/embeddings"]
-secret-proxy = ["starpod-vault/secret-proxy"]
+secret-proxy = ["starpod-vault/secret-proxy", "dep:starpod-proxy", "starpod-proxy/mitm"]
 
 [dependencies]
 agent-sdk = { workspace = true }
@@ -22,6 +22,7 @@ starpod-cron = { workspace = true }
 starpod-db = { workspace = true }
 starpod-browser = { workspace = true }
 starpod-vault = { workspace = true }
+starpod-proxy = { workspace = true, optional = true }
 chrono = { version = "0.4", features = ["serde"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }

@@ -47,6 +47,10 @@ pub enum StarpodError {
     #[error("Channel error: {0}")]
     Channel(String),
 
+    /// Secret proxy errors.
+    #[error("Proxy error: {0}")]
+    Proxy(String),
+
     /// Serialization errors.
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),

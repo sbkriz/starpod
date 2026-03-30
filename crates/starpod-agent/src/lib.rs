@@ -111,6 +111,10 @@ pub struct StarpodAgent {
     /// [`flush_stale_sessions`] can find all sessions belonging to a user
     /// without querying the database.
     nudge_counters: tokio::sync::RwLock<HashMap<String, (String, u32)>>,
+    /// Handle to the running secret proxy (Phase 2+). When `Some`, tool
+    /// subprocesses get `HTTP_PROXY`/`HTTPS_PROXY` env vars pointing to it.
+    #[cfg(feature = "secret-proxy")]
+    proxy_handle: Option<starpod_proxy::ProxyHandle>,
 }
 
 impl StarpodAgent {
@@ -221,6 +225,36 @@ impl StarpodAgent {
             }
         };
 
+        // Start the secret proxy if enabled (Phase 2+)
+        #[cfg(feature = "secret-proxy")]
+        let proxy_handle = if config.proxy.enabled {
+            match starpod_vault::derive_master_key(&paths.db_dir) {
+                Ok(master_key) => {
+                    match starpod_proxy::start_proxy(starpod_proxy::ProxyConfig {
+                        master_key,
+                        data_dir: paths.db_dir.clone(),
+                    })
+                    .await
+                    {
+                        Ok(handle) => {
+                            tracing::info!(port = handle.port(), "Secret proxy started");
+                            Some(handle)
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to start secret proxy: {e} — falling back to no proxy");
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("No vault key for proxy: {e} — falling back to no proxy");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Ok(Self {
             memory: Arc::new(memory),
             session_mgr: Arc::new(session_mgr),
@@ -233,6 +267,8 @@ impl StarpodAgent {
             model_registry: tokio::sync::RwLock::new(None),
             bootstrap_cache: tokio::sync::RwLock::new(HashMap::new()),
             nudge_counters: tokio::sync::RwLock::new(HashMap::new()),
+            #[cfg(feature = "secret-proxy")]
+            proxy_handle,
         })
     }
 
@@ -1112,6 +1148,24 @@ impl StarpodAgent {
             )
             .hook_dirs(vec![config.db_dir.join("hooks")]);
 
+        // Inject proxy env vars into tool subprocesses
+        #[cfg(feature = "secret-proxy")]
+        if let Some(ref handle) = self.proxy_handle {
+            let proxy_url = format!("http://127.0.0.1:{}", handle.port());
+            builder = builder
+                .env("HTTP_PROXY", &proxy_url)
+                .env("HTTPS_PROXY", &proxy_url)
+                .env("http_proxy", &proxy_url)
+                .env("https_proxy", &proxy_url);
+            if let Some(ref ca_path) = handle.ca_cert_path {
+                let ca = ca_path.to_string_lossy().to_string();
+                builder = builder
+                    .env("SSL_CERT_FILE", &ca)
+                    .env("NODE_EXTRA_CA_CERTS", &ca)
+                    .env("REQUESTS_CA_BUNDLE", &ca);
+            }
+        }
+
         // Resume existing session to load conversation history, or set ID for new ones
         if is_resuming {
             builder = builder.resume(session_id.clone());
@@ -1422,6 +1476,24 @@ impl StarpodAgent {
             )
             .hook_dirs(vec![config.db_dir.join("hooks")])
             .include_partial_messages(true);
+
+        // Inject proxy env vars into tool subprocesses
+        #[cfg(feature = "secret-proxy")]
+        if let Some(ref handle) = self.proxy_handle {
+            let proxy_url = format!("http://127.0.0.1:{}", handle.port());
+            builder = builder
+                .env("HTTP_PROXY", &proxy_url)
+                .env("HTTPS_PROXY", &proxy_url)
+                .env("http_proxy", &proxy_url)
+                .env("https_proxy", &proxy_url);
+            if let Some(ref ca_path) = handle.ca_cert_path {
+                let ca = ca_path.to_string_lossy().to_string();
+                builder = builder
+                    .env("SSL_CERT_FILE", &ca)
+                    .env("NODE_EXTRA_CA_CERTS", &ca)
+                    .env("REQUESTS_CA_BUNDLE", &ca);
+            }
+        }
 
         // Resume existing session to load conversation history, or set ID for new ones
         if is_resuming {

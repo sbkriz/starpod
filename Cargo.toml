@@ -14,6 +14,7 @@ members = [
     "crates/starpod-telegram",
     "crates/starpod-instances",
     "crates/starpod-vault",
+    "crates/starpod-proxy",
     "crates/starpod-auth",
     "crates/starpod-db",
     "crates/starpod",
@@ -41,5 +42,6 @@ starpod-instances = { version = "0.2.1", path = "crates/starpod-instances" }
 starpod-vault = { version = "0.2.1", path = "crates/starpod-vault" }
 starpod-auth = { version = "0.2.1", path = "crates/starpod-auth" }
 starpod-db = { version = "0.2.1", path = "crates/starpod-db" }
+starpod-proxy = { version = "0.2.1", path = "crates/starpod-proxy" }
 agent-sdk = { version = "0.2.1", path = "crates/agent-sdk", package = "starpod-agent-sdk" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

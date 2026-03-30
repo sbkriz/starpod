@@ -83,6 +83,9 @@ pub struct ToolExecutor {
     /// Environment variable names to strip from child processes (Bash).
     /// Prevents the agent from reading sensitive keys via shell commands.
     env_blocklist: Vec<String>,
+    /// Additional environment variables to inject into child processes (Bash).
+    /// Used by the secret proxy to set `HTTP_PROXY`, `HTTPS_PROXY`, etc.
+    env_inject: HashMap<String, String>,
 }
 
 /// Guides file-based tools to stay within a set of allowed directory trees.
@@ -196,6 +199,7 @@ impl ToolExecutor {
             cwd,
             boundary: None,
             env_blocklist: Vec::new(),
+            env_inject: HashMap::new(),
         }
     }
 
@@ -207,12 +211,20 @@ impl ToolExecutor {
             cwd,
             boundary: Some(boundary),
             env_blocklist: Vec::new(),
+            env_inject: HashMap::new(),
         }
     }
 
     /// Set environment variable names to strip from child processes.
     pub fn with_env_blocklist(mut self, blocklist: Vec<String>) -> Self {
         self.env_blocklist = blocklist;
+        self
+    }
+
+    /// Set additional environment variables to inject into child processes.
+    /// Used by the secret proxy to set `HTTP_PROXY`, `HTTPS_PROXY`, etc.
+    pub fn with_env_inject(mut self, env: HashMap<String, String>) -> Self {
+        self.env_inject = env;
         self
     }
 
@@ -486,6 +498,9 @@ impl ToolExecutor {
                 .env("HOME", &self.cwd)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
+            for (key, value) in &self.env_inject {
+                cmd.env(key, value);
+            }
             for key in &self.env_blocklist {
                 cmd.env_remove(key);
             }
@@ -514,6 +529,9 @@ impl ToolExecutor {
             .env("HOME", &self.cwd)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+        for (key, value) in &self.env_inject {
+            cmd.env(key, value);
+        }
         for key in &self.env_blocklist {
             cmd.env_remove(key);
         }
