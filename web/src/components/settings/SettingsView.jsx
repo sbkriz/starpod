@@ -64,7 +64,7 @@ const tabGroups = [
       { id: 'memory', label: 'Memory' },
       { id: 'compaction', label: 'Compaction' },
       { id: 'internet', label: 'Internet' },
-      { id: 'cron', label: 'Cron' },
+      { id: 'cron', label: 'Schedules' },
       { id: 'browser', label: 'Browser (beta)' },
       { id: 'channels', label: 'Channels' },
       { id: 'skills', label: 'Skills' },

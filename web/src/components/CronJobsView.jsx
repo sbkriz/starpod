@@ -447,7 +447,7 @@ export default function CronJobsView() {
         return r.json()
       })
       .then(data => {
-        setJobs(data || [])
+        setJobs((data || []).filter(j => j.name !== '__heartbeat__'))
         setLoading(false)
       })
       .catch(e => {
@@ -474,7 +474,7 @@ export default function CronJobsView() {
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       <ViewHeader
-        title="Cron Jobs"
+        title="Schedules"
         right={!showForm && (
           <button
             onClick={() => setShowForm(true)}
@@ -483,7 +483,7 @@ export default function CronJobsView() {
             <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M8 3v10M3 8h10" />
             </svg>
-            Add job
+            Add schedule
           </button>
         )}
       />
@@ -503,7 +503,7 @@ export default function CronJobsView() {
         )}
         {!loading && !error && jobs.length === 0 && !showForm && (
           <div className="text-center text-dim text-sm py-12 font-mono">
-            No cron jobs scheduled
+            No schedules yet
           </div>
         )}
         {!loading && !error && jobs.length > 0 && (

@@ -182,7 +182,7 @@ function Sidebar({ onSelectSession, onNewChat }) {
         <button
           onClick={handleCronClick}
           className={`sidebar-rail-btn${cronVisible ? ' active' : ''}`}
-          data-tooltip="Cron Jobs"
+          data-tooltip="Schedules"
         >
           <svg className="w-4 h-4 stroke-current fill-none stroke-[1.5]" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
@@ -253,7 +253,7 @@ function Sidebar({ onSelectSession, onNewChat }) {
             <svg className="w-4 h-4 stroke-current fill-none stroke-[1.5]" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
             </svg>
-            <span>Cron Jobs</span>
+            <span>Schedules</span>
           </button>
           {showFiles && (
             <button
