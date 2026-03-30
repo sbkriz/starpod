@@ -27,6 +27,18 @@ const Chat = forwardRef(function Chat({ wsRef, onSendPrompt }, ref) {
     scrollToBottom()
   }, [messages, streamingMessage, scrollToBottom])
 
+  // Reactively load session when currentSessionId changes
+  const prevSessionIdRef = useRef(undefined)
+  useEffect(() => {
+    if (prevSessionIdRef.current === currentSessionId) return
+    prevSessionIdRef.current = currentSessionId
+    if (currentSessionId) {
+      loadSession(currentSessionId)
+    } else {
+      showWelcome()
+    }
+  }, [currentSessionId]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Update header title from first user message
   useEffect(() => {
     const first = messages.find(m => m.role === 'user')

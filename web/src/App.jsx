@@ -116,14 +116,6 @@ function AppInner() {
 
   useEffect(() => { connect(); fetchSessionList() }, [connect, fetchSessionList])
 
-  // ── Load session from URL on mount ──
-  useEffect(() => {
-    if (currentSessionId && chatRef.current) {
-      chatRef.current.loadSession(currentSessionId)
-      dispatch({ type: 'MARK_READ', payload: currentSessionId })
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
   // ── Send message ──
   const { selectedModel } = state
   const handleSend = useCallback((text, attachments) => {
@@ -146,7 +138,6 @@ function AppInner() {
       dispatch({ type: 'MARK_SESSION_READ', payload: session.id })
       markSessionRead(session.id)
     }
-    if (chatRef.current) chatRef.current.loadSession(session.id)
     if (isMobile()) dispatch({ type: 'CLOSE_SIDEBAR' })
   }, [dispatch, settingsVisible, cronVisible, filesVisible, previewUrl])
 
@@ -157,7 +148,6 @@ function AppInner() {
     if (filesVisible) dispatch({ type: 'HIDE_FILES' })
     if (previewUrl) dispatch({ type: 'CLOSE_PREVIEW' })
     dispatch({ type: 'NEW_CHAT' })
-    if (chatRef.current) chatRef.current.showWelcome()
     if (isMobile()) dispatch({ type: 'CLOSE_SIDEBAR' })
   }, [dispatch, settingsVisible, cronVisible, filesVisible, previewUrl])
 
@@ -195,23 +185,21 @@ function AppInner() {
         if (settingsVisible) dispatch({ type: 'HIDE_SETTINGS' })
         if (cronVisible) dispatch({ type: 'HIDE_CRON' })
         if (filesVisible) dispatch({ type: 'HIDE_FILES' })
-        if (id && id !== currentSessionId) {
+        if (id && id !== currentSessionIdRef.current) {
           dispatch({ type: 'SET_SESSION', payload: { id, _fromPopState: true } })
-          if (chatRef.current) chatRef.current.loadSession(id)
         }
       } else {
         if (settingsVisible) dispatch({ type: 'HIDE_SETTINGS' })
         if (cronVisible) dispatch({ type: 'HIDE_CRON' })
         if (filesVisible) dispatch({ type: 'HIDE_FILES' })
-        if (currentSessionId) {
+        if (currentSessionIdRef.current) {
           dispatch({ type: 'NEW_CHAT', _fromPopState: true })
-          if (chatRef.current) chatRef.current.showWelcome()
         }
       }
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
-  }, [dispatch, settingsVisible, cronVisible, filesVisible, currentSessionId])
+  }, [dispatch, settingsVisible, cronVisible, filesVisible])
 
   // ── Keyboard shortcuts ──
   useEffect(() => {
