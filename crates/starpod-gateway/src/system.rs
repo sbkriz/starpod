@@ -1137,6 +1137,7 @@ mod tests {
     fn extract_and_find_binary_from_tarball() {
         use flate2::write::GzEncoder;
         use flate2::Compression;
+        #[allow(unused_imports)]
         use std::io::Write;
 
         let dir = tempfile::tempdir().unwrap();

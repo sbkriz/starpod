@@ -251,7 +251,7 @@ mod tests {
 
         // Bundle should contain our CA cert
         assert!(
-            bundle.contains(&ca_pem.trim()),
+            bundle.contains(ca_pem.trim()),
             "Bundle should contain the local CA cert"
         );
     }

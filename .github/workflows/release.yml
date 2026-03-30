@@ -68,8 +68,12 @@ jobs:
       - name: Build
         run: |
           EXTRA_FLAGS=""
-          if [[ "${{ matrix.target }}" == *musl* ]]; then
-            EXTRA_FLAGS="--no-default-features"
+          if [[ "${{ matrix.target }}" == *linux* ]]; then
+            # Linux: enable secret proxy with network namespace isolation
+            EXTRA_FLAGS="--no-default-features --features secret-proxy-netns"
+          elif [[ "${{ matrix.target }}" == *apple* ]]; then
+            # macOS: enable secret proxy (no netns, Tier 0 only)
+            EXTRA_FLAGS="--features secret-proxy"
           fi
           cargo build --release --locked --target ${{ matrix.target }} $EXTRA_FLAGS
 

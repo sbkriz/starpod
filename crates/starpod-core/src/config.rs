@@ -256,17 +256,11 @@ impl Default for InternetConfig {
 /// [proxy]
 /// enabled = true
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProxyConfig {
     /// Whether the secret proxy is enabled (default: `false`).
     pub enabled: bool,
-}
-
-impl Default for ProxyConfig {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
 }
 
 /// Channel configuration namespace (`[channels.*]`).

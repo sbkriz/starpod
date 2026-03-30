@@ -309,7 +309,7 @@ auto_index = true
             doc["auth"]["rate_limit_requests"].as_integer().unwrap(),
             100
         );
-        assert_eq!(doc["memory"]["enabled"].as_bool().unwrap(), true);
+        assert!(doc["memory"]["enabled"].as_bool().unwrap());
     }
 
     #[test]
