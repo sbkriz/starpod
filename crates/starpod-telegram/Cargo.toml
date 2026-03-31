@@ -13,7 +13,7 @@ starpod-agent = { workspace = true }
 starpod-auth = { workspace = true }
 agent-sdk = { workspace = true }
 teloxide = { version = "0.13", default-features = false, features = ["macros", "rustls", "ctrlc_handler"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full", "test-util"] }
 tokio-stream = "0.1"
 tracing = "0.1"
 base64 = "0.22"

@@ -263,7 +263,7 @@ async fn handle_message(
         "Telegram message received"
     );
 
-    // Show typing indicator
+    // Show typing indicator immediately (the streaming handlers will keep it alive)
     bot.send_chat_action(chat_id, teloxide::types::ChatAction::Typing)
         .await
         .ok();
@@ -291,6 +291,39 @@ fn build_chat_msg(
         triggered_by: None,
         model: None,
     }
+}
+
+/// Spawn a background task that re-sends the "typing" chat action every 4 seconds.
+///
+/// Telegram's typing indicator expires after ~5 seconds, so this keeps it alive
+/// for the entire duration of a long-running agent response (tool calls, reasoning, etc.).
+///
+/// The loop stops when the returned [`tokio::sync::watch::Sender`] is dropped.
+/// Callers should bind it to `_typing` and `drop(_typing)` once the response is ready.
+///
+/// # Example
+///
+/// ```ignore
+/// let _typing = spawn_typing_loop(bot.clone(), chat_id);
+/// // ... long streaming work ...
+/// drop(_typing);  // stop the typing indicator
+/// send_response(bot, chat_id, &text).await;
+/// ```
+fn spawn_typing_loop(bot: Bot, chat_id: ChatId) -> tokio::sync::watch::Sender<bool> {
+    let (stop_tx, mut stop_rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(4)) => {
+                    bot.send_chat_action(chat_id, teloxide::types::ChatAction::Typing)
+                        .await
+                        .ok();
+                }
+                _ = stop_rx.changed() => break,
+            }
+        }
+    });
+    stop_tx
 }
 
 /// Extract text content from an assistant message's content blocks.
@@ -332,6 +365,8 @@ async fn handle_final_only(
             }
         };
 
+    let _typing = spawn_typing_loop(bot.clone(), chat_id);
+
     let mut last_assistant_text = String::new();
     let mut all_text = String::new();
     let mut result_msg = None;
@@ -366,6 +401,8 @@ async fn handle_final_only(
             }
         }
     }
+
+    drop(_typing);
 
     // Send only the last assistant message
     if last_assistant_text.is_empty() {
@@ -410,6 +447,8 @@ async fn handle_all_messages(
             }
         };
 
+    let _typing = spawn_typing_loop(bot.clone(), chat_id);
+
     let mut all_text = String::new();
     let mut result_msg = None;
 
@@ -444,6 +483,8 @@ async fn handle_all_messages(
             }
         }
     }
+
+    drop(_typing);
 
     if all_text.is_empty() {
         bot.send_message(chat_id, "(no response)").await.ok();
@@ -922,5 +963,47 @@ mod tests {
         for chunk in &chunks {
             assert!(chunk.len() <= 5);
         }
+    }
+
+    /// Verify that `spawn_typing_loop` stops promptly when the sender is dropped.
+    ///
+    /// Uses `tokio::time::pause()` so the test runs instantly without real sleeps.
+    /// The bot HTTP calls fail (no real token), but `.ok()` swallows the errors.
+    #[tokio::test]
+    async fn test_typing_loop_stops_on_drop() {
+        tokio::time::pause();
+
+        let bot = Bot::new("fake-token");
+        let chat_id = ChatId(12345);
+        let stop = spawn_typing_loop(bot, chat_id);
+
+        // Advance past several ticks — the loop should keep running.
+        tokio::time::advance(std::time::Duration::from_secs(12)).await;
+        tokio::task::yield_now().await;
+
+        // Drop the sender to signal shutdown.
+        drop(stop);
+        tokio::task::yield_now().await;
+
+        // The spawned task should have exited. Advance time to confirm no panic.
+        tokio::time::advance(std::time::Duration::from_secs(10)).await;
+        tokio::task::yield_now().await;
+    }
+
+    /// Verify that the typing loop can be stopped early (before the first tick).
+    #[tokio::test]
+    async fn test_typing_loop_immediate_drop() {
+        tokio::time::pause();
+
+        let bot = Bot::new("fake-token");
+        let chat_id = ChatId(12345);
+        let stop = spawn_typing_loop(bot, chat_id);
+
+        // Drop immediately — should not panic or hang.
+        drop(stop);
+        tokio::task::yield_now().await;
+
+        tokio::time::advance(std::time::Duration::from_secs(8)).await;
+        tokio::task::yield_now().await;
     }
 }
