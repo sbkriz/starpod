@@ -356,6 +356,12 @@ async fn run_agent_loop(
                 conversation.push(api_msg);
             }
         }
+
+        // Repair orphaned tool_use blocks: if the last assistant message contains
+        // tool_use blocks without matching tool_result blocks in the following user
+        // message, inject synthetic error tool_results so the API doesn't reject
+        // the conversation history.
+        repair_orphaned_tool_uses(&mut conversation);
     }
 
     // Add the user prompt (with optional image attachments)
@@ -1341,6 +1347,79 @@ fn parse_content_blocks(content: &serde_json::Value) -> Option<Vec<ApiContentBlo
     None
 }
 
+/// Repair orphaned `tool_use` blocks at the tail of a conversation.
+///
+/// The Claude API requires every `tool_use` block in an assistant message to have
+/// a corresponding `tool_result` block in the immediately following user message.
+/// If a session was interrupted mid-tool-execution (crash, timeout, kill), the
+/// assistant message with `tool_use` blocks may have been persisted without the
+/// subsequent `tool_result` messages. This function detects that case and appends
+/// a synthetic user message with error `tool_result` blocks so the conversation
+/// can be resumed without API validation errors.
+fn repair_orphaned_tool_uses(conversation: &mut Vec<ApiMessage>) {
+    // Walk backwards to find the last assistant message.
+    let last_assistant_idx = conversation
+        .iter()
+        .rposition(|m| m.role == "assistant");
+
+    let Some(idx) = last_assistant_idx else {
+        return;
+    };
+
+    // Collect tool_use IDs from that assistant message.
+    let tool_use_ids: Vec<String> = conversation[idx]
+        .content
+        .iter()
+        .filter_map(|block| match block {
+            ApiContentBlock::ToolUse { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+
+    if tool_use_ids.is_empty() {
+        return;
+    }
+
+    // Collect tool_result IDs from all subsequent user messages.
+    let mut answered_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for msg in &conversation[idx + 1..] {
+        if msg.role == "user" {
+            for block in &msg.content {
+                if let ApiContentBlock::ToolResult { tool_use_id, .. } = block {
+                    answered_ids.insert(tool_use_id.clone());
+                }
+            }
+        }
+    }
+
+    // Build synthetic tool_result blocks for any orphaned tool_use IDs.
+    let orphaned: Vec<ApiContentBlock> = tool_use_ids
+        .into_iter()
+        .filter(|id| !answered_ids.contains(id))
+        .map(|id| {
+            warn!(tool_use_id = %id, "Repairing orphaned tool_use with synthetic error tool_result");
+            ApiContentBlock::ToolResult {
+                tool_use_id: id,
+                content: json!("[Session interrupted — tool execution was not completed]"),
+                is_error: Some(true),
+                cache_control: None,
+                name: None,
+            }
+        })
+        .collect();
+
+    if !orphaned.is_empty() {
+        warn!(
+            count = orphaned.len(),
+            "Injected synthetic tool_result(s) for orphaned tool_use blocks"
+        );
+        conversation.push(ApiMessage {
+            role: "user".to_string(),
+            content: orphaned,
+        });
+    }
+}
+
 /// Build a ResultMessage.
 #[allow(clippy::too_many_arguments)]
 fn build_result_message(
@@ -2108,5 +2187,480 @@ mod tests {
         } else {
             panic!("expected ToolUse block");
         }
+    }
+
+    #[test]
+    fn repair_orphaned_tool_uses_injects_synthetic_results() {
+        let mut conversation = vec![
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::Text {
+                    text: "run a command".to_string(),
+                    cache_control: None,
+                }],
+            },
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![
+                    ApiContentBlock::Text {
+                        text: "Sure, let me run that.".to_string(),
+                        cache_control: None,
+                    },
+                    ApiContentBlock::ToolUse {
+                        id: "toolu_orphaned_1".to_string(),
+                        name: "Bash".to_string(),
+                        input: json!({"command": "ls"}),
+                    },
+                    ApiContentBlock::ToolUse {
+                        id: "toolu_orphaned_2".to_string(),
+                        name: "Bash".to_string(),
+                        input: json!({"command": "pwd"}),
+                    },
+                ],
+            },
+        ];
+
+        repair_orphaned_tool_uses(&mut conversation);
+
+        assert_eq!(conversation.len(), 3);
+        let repaired = &conversation[2];
+        assert_eq!(repaired.role, "user");
+        assert_eq!(repaired.content.len(), 2);
+
+        for block in &repaired.content {
+            match block {
+                ApiContentBlock::ToolResult {
+                    tool_use_id,
+                    is_error,
+                    ..
+                } => {
+                    assert!(
+                        tool_use_id == "toolu_orphaned_1"
+                            || tool_use_id == "toolu_orphaned_2"
+                    );
+                    assert_eq!(*is_error, Some(true));
+                }
+                _ => panic!("expected ToolResult block"),
+            }
+        }
+    }
+
+    #[test]
+    fn repair_orphaned_tool_uses_noop_when_results_exist() {
+        let mut conversation = vec![
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![ApiContentBlock::ToolUse {
+                    id: "toolu_ok".to_string(),
+                    name: "Bash".to_string(),
+                    input: json!({"command": "ls"}),
+                }],
+            },
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::ToolResult {
+                    tool_use_id: "toolu_ok".to_string(),
+                    content: json!("file1\nfile2"),
+                    is_error: None,
+                    cache_control: None,
+                    name: Some("Bash".to_string()),
+                }],
+            },
+        ];
+
+        let original_len = conversation.len();
+        repair_orphaned_tool_uses(&mut conversation);
+        assert_eq!(conversation.len(), original_len);
+    }
+
+    #[test]
+    fn repair_orphaned_tool_uses_partial_results() {
+        // One tool_use has a result, the other doesn't
+        let mut conversation = vec![
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![
+                    ApiContentBlock::ToolUse {
+                        id: "toolu_answered".to_string(),
+                        name: "Bash".to_string(),
+                        input: json!({"command": "ls"}),
+                    },
+                    ApiContentBlock::ToolUse {
+                        id: "toolu_missing".to_string(),
+                        name: "Bash".to_string(),
+                        input: json!({"command": "pwd"}),
+                    },
+                ],
+            },
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::ToolResult {
+                    tool_use_id: "toolu_answered".to_string(),
+                    content: json!("ok"),
+                    is_error: None,
+                    cache_control: None,
+                    name: Some("Bash".to_string()),
+                }],
+            },
+        ];
+
+        repair_orphaned_tool_uses(&mut conversation);
+        assert_eq!(conversation.len(), 3);
+
+        let repaired = &conversation[2];
+        assert_eq!(repaired.content.len(), 1);
+        if let ApiContentBlock::ToolResult { tool_use_id, .. } = &repaired.content[0] {
+            assert_eq!(tool_use_id, "toolu_missing");
+        } else {
+            panic!("expected ToolResult");
+        }
+    }
+
+    #[test]
+    fn repair_orphaned_tool_uses_noop_no_tool_use() {
+        let mut conversation = vec![
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::Text {
+                    text: "hello".to_string(),
+                    cache_control: None,
+                }],
+            },
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![ApiContentBlock::Text {
+                    text: "hi there".to_string(),
+                    cache_control: None,
+                }],
+            },
+        ];
+
+        let original_len = conversation.len();
+        repair_orphaned_tool_uses(&mut conversation);
+        assert_eq!(conversation.len(), original_len);
+    }
+
+    #[test]
+    fn repair_orphaned_tool_uses_noop_empty_conversation() {
+        let mut conversation: Vec<ApiMessage> = vec![];
+        repair_orphaned_tool_uses(&mut conversation);
+        assert!(conversation.is_empty());
+    }
+
+    #[test]
+    fn repair_orphaned_tool_uses_noop_only_user_messages() {
+        let mut conversation = vec![
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::Text {
+                    text: "hello".to_string(),
+                    cache_control: None,
+                }],
+            },
+        ];
+
+        let original_len = conversation.len();
+        repair_orphaned_tool_uses(&mut conversation);
+        assert_eq!(conversation.len(), original_len);
+    }
+
+    #[test]
+    fn repair_orphaned_single_tool_use() {
+        let mut conversation = vec![
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![ApiContentBlock::ToolUse {
+                    id: "toolu_single".to_string(),
+                    name: "Read".to_string(),
+                    input: json!({"path": "/tmp/test"}),
+                }],
+            },
+        ];
+
+        repair_orphaned_tool_uses(&mut conversation);
+        assert_eq!(conversation.len(), 2);
+
+        let repaired = &conversation[1];
+        assert_eq!(repaired.role, "user");
+        assert_eq!(repaired.content.len(), 1);
+        if let ApiContentBlock::ToolResult {
+            tool_use_id,
+            is_error,
+            content,
+            ..
+        } = &repaired.content[0]
+        {
+            assert_eq!(tool_use_id, "toolu_single");
+            assert_eq!(*is_error, Some(true));
+            assert!(content
+                .as_str()
+                .unwrap()
+                .contains("Session interrupted"));
+        } else {
+            panic!("expected ToolResult");
+        }
+    }
+
+    #[test]
+    fn repair_orphaned_long_session_with_completed_cycles() {
+        // Simulate a long session: multiple completed tool cycles, then orphan at tail
+        let mut conversation = vec![
+            // Turn 1: user asks
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::Text {
+                    text: "list files".to_string(),
+                    cache_control: None,
+                }],
+            },
+            // Turn 1: assistant calls tool
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![ApiContentBlock::ToolUse {
+                    id: "toolu_turn1".to_string(),
+                    name: "Bash".to_string(),
+                    input: json!({"command": "ls"}),
+                }],
+            },
+            // Turn 1: tool result
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::ToolResult {
+                    tool_use_id: "toolu_turn1".to_string(),
+                    content: json!("file1.txt\nfile2.txt"),
+                    is_error: None,
+                    cache_control: None,
+                    name: Some("Bash".to_string()),
+                }],
+            },
+            // Turn 1: assistant responds
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![ApiContentBlock::Text {
+                    text: "Here are your files.".to_string(),
+                    cache_control: None,
+                }],
+            },
+            // Turn 2: user asks again
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::Text {
+                    text: "now start the tunnel".to_string(),
+                    cache_control: None,
+                }],
+            },
+            // Turn 2: assistant calls tool (ORPHANED - session crashed here)
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![
+                    ApiContentBlock::Text {
+                        text: "Starting tunnel now.".to_string(),
+                        cache_control: None,
+                    },
+                    ApiContentBlock::ToolUse {
+                        id: "toolu_crash".to_string(),
+                        name: "Bash".to_string(),
+                        input: json!({"command": "cloudflared tunnel run"}),
+                    },
+                ],
+            },
+        ];
+
+        repair_orphaned_tool_uses(&mut conversation);
+        assert_eq!(conversation.len(), 7); // original 6 + 1 synthetic
+
+        let repaired = &conversation[6];
+        assert_eq!(repaired.role, "user");
+        assert_eq!(repaired.content.len(), 1);
+        if let ApiContentBlock::ToolResult { tool_use_id, .. } = &repaired.content[0] {
+            assert_eq!(tool_use_id, "toolu_crash");
+        } else {
+            panic!("expected ToolResult for orphaned tool_use");
+        }
+    }
+
+    #[test]
+    fn repair_orphaned_user_text_after_tool_use_no_result() {
+        // Assistant calls a tool, but the next user message is text (not a tool_result).
+        // This can happen if value_to_api_message dropped the tool_result message
+        // and a new user prompt was added.
+        let mut conversation = vec![
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![ApiContentBlock::ToolUse {
+                    id: "toolu_lost".to_string(),
+                    name: "Bash".to_string(),
+                    input: json!({"command": "ls"}),
+                }],
+            },
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::Text {
+                    text: "never mind, do something else".to_string(),
+                    cache_control: None,
+                }],
+            },
+        ];
+
+        repair_orphaned_tool_uses(&mut conversation);
+        assert_eq!(conversation.len(), 3);
+
+        let repaired = &conversation[2];
+        assert_eq!(repaired.content.len(), 1);
+        if let ApiContentBlock::ToolResult { tool_use_id, .. } = &repaired.content[0] {
+            assert_eq!(tool_use_id, "toolu_lost");
+        } else {
+            panic!("expected ToolResult");
+        }
+    }
+
+    #[test]
+    fn repair_orphaned_idempotent() {
+        // Calling repair twice should not add duplicate synthetic results
+        let mut conversation = vec![
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![ApiContentBlock::ToolUse {
+                    id: "toolu_idem".to_string(),
+                    name: "Bash".to_string(),
+                    input: json!({"command": "ls"}),
+                }],
+            },
+        ];
+
+        repair_orphaned_tool_uses(&mut conversation);
+        assert_eq!(conversation.len(), 2);
+
+        // Call again — the tool_result now exists, so it should be a no-op
+        repair_orphaned_tool_uses(&mut conversation);
+        assert_eq!(conversation.len(), 2);
+    }
+
+    #[test]
+    fn repair_orphaned_results_split_across_multiple_user_messages() {
+        // Two tool_uses, results come in separate user messages (streamed individually)
+        let mut conversation = vec![
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![
+                    ApiContentBlock::ToolUse {
+                        id: "toolu_a".to_string(),
+                        name: "Bash".to_string(),
+                        input: json!({"command": "ls"}),
+                    },
+                    ApiContentBlock::ToolUse {
+                        id: "toolu_b".to_string(),
+                        name: "Read".to_string(),
+                        input: json!({"path": "/tmp/x"}),
+                    },
+                ],
+            },
+            // First result in its own message
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::ToolResult {
+                    tool_use_id: "toolu_a".to_string(),
+                    content: json!("ok"),
+                    is_error: None,
+                    cache_control: None,
+                    name: Some("Bash".to_string()),
+                }],
+            },
+            // Second result in a separate message
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::ToolResult {
+                    tool_use_id: "toolu_b".to_string(),
+                    content: json!("file content"),
+                    is_error: None,
+                    cache_control: None,
+                    name: Some("Read".to_string()),
+                }],
+            },
+        ];
+
+        let original_len = conversation.len();
+        repair_orphaned_tool_uses(&mut conversation);
+        // Both results exist — no repair needed
+        assert_eq!(conversation.len(), original_len);
+    }
+
+    #[test]
+    fn repair_orphaned_with_thinking_blocks() {
+        // Assistant message has thinking + tool_use — thinking shouldn't interfere
+        let mut conversation = vec![
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![
+                    ApiContentBlock::Thinking {
+                        thinking: "Let me think about this...".to_string(),
+                    },
+                    ApiContentBlock::Text {
+                        text: "I'll check that.".to_string(),
+                        cache_control: None,
+                    },
+                    ApiContentBlock::ToolUse {
+                        id: "toolu_think".to_string(),
+                        name: "Bash".to_string(),
+                        input: json!({"command": "cat /etc/hosts"}),
+                    },
+                ],
+            },
+        ];
+
+        repair_orphaned_tool_uses(&mut conversation);
+        assert_eq!(conversation.len(), 2);
+
+        let repaired = &conversation[1];
+        assert_eq!(repaired.content.len(), 1);
+        if let ApiContentBlock::ToolResult {
+            tool_use_id,
+            is_error,
+            ..
+        } = &repaired.content[0]
+        {
+            assert_eq!(tool_use_id, "toolu_think");
+            assert_eq!(*is_error, Some(true));
+        } else {
+            panic!("expected ToolResult");
+        }
+    }
+
+    #[test]
+    fn repair_orphaned_earlier_assistant_with_tool_use_is_ignored() {
+        // An earlier assistant message has tool_use (fully resolved), and the LAST
+        // assistant message is text-only. No repair should happen — only the last
+        // assistant message is checked.
+        let mut conversation = vec![
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![ApiContentBlock::ToolUse {
+                    id: "toolu_early".to_string(),
+                    name: "Bash".to_string(),
+                    input: json!({"command": "ls"}),
+                }],
+            },
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![ApiContentBlock::ToolResult {
+                    tool_use_id: "toolu_early".to_string(),
+                    content: json!("output"),
+                    is_error: None,
+                    cache_control: None,
+                    name: Some("Bash".to_string()),
+                }],
+            },
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![ApiContentBlock::Text {
+                    text: "All done!".to_string(),
+                    cache_control: None,
+                }],
+            },
+        ];
+
+        let original_len = conversation.len();
+        repair_orphaned_tool_uses(&mut conversation);
+        assert_eq!(conversation.len(), original_len);
     }
 }
